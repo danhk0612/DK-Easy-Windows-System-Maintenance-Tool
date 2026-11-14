@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -118,7 +119,8 @@ internal static class AntivirusEngine
         }
     }
 
-    internal static async Task<(int ExitCode, string Output)> ScanAsync(string target, CancellationToken token)
+    internal static async Task<(int ExitCode, string Output)> ScanAsync(
+        string target, IProgress<(long Done, long Total)> progress, CancellationToken token)
     {
         using var operationLock = AcquireLock();
         var current = CurrentVersion() ?? throw new IOException("먼저 ClamAV 엔진을 다운로드하세요.");
@@ -126,9 +128,55 @@ internal static class AntivirusEngine
         for (string? part = fullPath; part is not null; part = Path.GetDirectoryName(part))
             if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("연결 경로는 검사 대상에 지정할 수 없습니다.");
-        return await RunAsync(Path.Combine(Root, current), "clamscan.exe", token,
-            "--recursive", "--infected", "--cross-fs=no", "--follow-dir-symlinks=0", "--follow-file-symlinks=0",
+        var total = CountFiles(fullPath, token);
+        progress.Report((0, total));
+        var completed = 0L;
+        var clock = Stopwatch.StartNew();
+        void ReportFile()
+        {
+            completed++;
+            if (clock.ElapsedMilliseconds < 200)
+                return;
+            clock.Restart();
+            progress.Report((Math.Min(completed, total), total));
+        }
+
+        return await RunProcessAsync(Path.Combine(Root, current), "clamscan.exe", token, ReportFile,
+            "--recursive", "--cross-fs=no", "--follow-dir-symlinks=0", "--follow-file-symlinks=0",
             "--official-db-only=yes", "--database=" + Database, "--", fullPath);
+    }
+
+    private static long CountFiles(string path, CancellationToken token)
+    {
+        if (!Directory.Exists(path))
+            return 1;
+
+        var pending = new Stack<string>();
+        pending.Push(path);
+        var count = 0L;
+        while (pending.TryPop(out var directory))
+        {
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+                {
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                            continue;
+                        if (entry is DirectoryInfo)
+                            pending.Push(entry.FullName);
+                        else
+                            count++;
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        return count;
     }
 
     private static FileStream AcquireLock()
@@ -145,8 +193,12 @@ internal static class AntivirusEngine
         catch (UnauthorizedAccessException) { }
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(
-        string engine, string program, CancellationToken token, params string[] arguments)
+    private static Task<(int ExitCode, string Output)> RunAsync(
+        string engine, string program, CancellationToken token, params string[] arguments) =>
+        RunProcessAsync(engine, program, token, null, arguments);
+
+    private static async Task<(int ExitCode, string Output)> RunProcessAsync(
+        string engine, string program, CancellationToken token, Action? fileProcessed, params string[] arguments)
     {
         token.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo(Path.Combine(engine, program))
@@ -165,10 +217,28 @@ internal static class AntivirusEngine
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }
         });
-        var output = process.StandardOutput.ReadToEndAsync();
+        var output = fileProcessed is null ? process.StandardOutput.ReadToEndAsync()
+            : ReadScanOutputAsync(process.StandardOutput, fileProcessed);
         var errors = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         token.ThrowIfCancellationRequested();
         return (process.ExitCode, string.Join(Environment.NewLine, await output, await errors).Trim());
+    }
+
+    private static async Task<string> ReadScanOutputAsync(StreamReader reader, Action fileProcessed)
+    {
+        var report = new StringBuilder();
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            if (line.EndsWith(": OK", StringComparison.Ordinal) || line.EndsWith(": Empty file", StringComparison.Ordinal))
+                fileProcessed();
+            else
+            {
+                if (line.EndsWith(" FOUND", StringComparison.Ordinal) || line.EndsWith(" ERROR", StringComparison.Ordinal))
+                    fileProcessed();
+                report.AppendLine(line);
+            }
+        }
+        return report.ToString();
     }
 }

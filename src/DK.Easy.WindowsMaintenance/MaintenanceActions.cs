@@ -14,6 +14,9 @@ internal static class MaintenanceActions
 {
     internal const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     internal const string DisabledRunKey = @"Software\DKEasyWindowsMaintenance\DisabledRun";
+    internal static readonly string UserStartup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+    internal static readonly string DisabledStartup = string.IsNullOrWhiteSpace(UserStartup) ? "" :
+        Path.Combine(Path.GetDirectoryName(UserStartup)!, "DKEasyWindowsMaintenance.DisabledStartup");
 
     internal static bool CanRecycle(StorageEntry file) => RecycleRestriction(file) is null;
 
@@ -59,7 +62,9 @@ internal static class MaintenanceActions
 
     internal static bool Available(string page, InventoryEntry item) => page switch
     {
-        "startup" => item.Location is "CurrentUser · Registry64 · Run" or "CurrentUser · Registry64 · 비활성",
+        "startup" => item.Detail is not null && (item.Location is "CurrentUser · Registry64 · Run" or "CurrentUser · Registry64 · 비활성"
+            or "LocalMachine · Registry64 · Run" or "LocalMachine · Registry32 · Run"
+            or "LocalMachine · Registry64 · 비활성" or "LocalMachine · Registry32 · 비활성" || IsUserStartupFolder(item) && item.StartupFileModifiedUtc.HasValue),
         "services" => !item.SystemItem && item.Target is not null && File.Exists(item.Target)
             && !string.IsNullOrWhiteSpace(item.Publisher) && !item.Publisher.Contains("Microsoft", StringComparison.OrdinalIgnoreCase),
         "tasks" => item.TaskDefinitionHash is not null && !item.SystemItem && !item.Location.StartsWith(@"\Microsoft\", StringComparison.OrdinalIgnoreCase)
@@ -74,7 +79,7 @@ internal static class MaintenanceActions
         return page switch
         {
             "startup" when item.Location.EndsWith("RunOnce", StringComparison.Ordinal) => "RunOnce 항목은 조회 전용입니다.",
-            "startup" => "앱에서 원본을 보존하며 변경할 수 있는 항목은 현재 사용자 64비트 Run입니다.",
+            "startup" => "문자열 Run 등록과 현재 사용자 시작 폴더의 확인된 항목을 관리할 수 있습니다. 공용 시작 폴더와 보호된 항목은 조회만 지원합니다.",
             "services" => "Windows 서비스이거나 실행 파일과 타사 게시자를 확인할 수 없어 앱에서 변경할 수 없습니다.",
             _ => "Windows 작업이거나 작성자 또는 작업 정의를 확인할 수 없어 앱에서 변경할 수 없습니다."
         };
@@ -82,9 +87,13 @@ internal static class MaintenanceActions
 
     internal static ManagementCommand[] Commands(string page, InventoryEntry item) => page switch
     {
-        "startup" when item.Location.EndsWith("비활성", StringComparison.Ordinal) =>
-            [new("restore", "자동 실행 복원", "다음 로그인부터 이 프로그램이 다시 실행될 수 있습니다.")],
-        "startup" => [new("disable", "자동 실행 비활성화", "원본 등록값을 보관합니다. 현재 실행 중인 앱은 계속 실행됩니다.")],
+        "startup" =>
+        [
+            item.State == "비활성"
+                ? new("restore", "자동 실행 활성화", "다음 로그인부터 이 프로그램이 다시 실행될 수 있습니다.")
+                : new("disable", "자동 실행 비활성화", "원본을 보관합니다. 현재 실행 중인 앱은 계속 실행됩니다."),
+            new("delete", "시작 등록 삭제", "자동 실행 등록을 제거합니다. 시작 폴더의 항목은 휴지통으로 이동합니다.")
+        ],
         "tasks" when item.State == "Disabled" =>
             [new("enable", "예약 작업 활성화", "다음 트리거부터 작업이 실행될 수 있습니다.")],
         "tasks" => [new("disable", "예약 작업 비활성화", "다음 트리거의 실행을 막습니다. 이미 실행 중인 작업은 계속 실행될 수 있습니다.")],
@@ -103,7 +112,15 @@ internal static class MaintenanceActions
     {
         if (!Available(page, item))
             throw new IOException("이 항목은 변경할 수 없습니다.");
-        return page == "startup" ? Task.Run(() => ChangeStartup(item, action)) : ChangeElevated(page, item, action);
+        if (page != "startup")
+            return ChangeElevated(page, item, action);
+        if (action != "delete" && action != (item.State == "비활성" ? "restore" : "disable"))
+            throw new IOException("현재 시작 항목 상태에 사용할 수 없는 작업입니다.");
+        if (item.Location.StartsWith("LocalMachine · ", StringComparison.Ordinal))
+            return ChangeMachineRun(item, action);
+        if (IsUserStartupFolder(item))
+            return Task.Run(() => ChangeStartupFile(item, action));
+        return Task.Run(() => ChangeStartup(item, action));
     }
 
     private static void ChangeStartup(InventoryEntry item, string action)
@@ -112,15 +129,20 @@ internal static class MaintenanceActions
         using var run = hive.CreateSubKey(RunKey);
         using var backup = hive.CreateSubKey(DisabledRunKey);
         var restore = action == "restore";
-        var from = restore ? backup : run;
+        var from = item.State == "비활성" ? backup : run;
         var to = restore ? run : backup;
         if (from.GetValue(item.Name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string value
-            || value != item.Detail || to.GetValue(item.Name) is not null)
+            || value != item.Detail || (action != "delete" && to.GetValue(item.Name) is not null))
             throw new IOException("검사 후 등록값이 변경되었거나 같은 이름의 값이 이미 있습니다. 다시 검사하세요.");
 
         var type = from.GetValueKind(item.Name);
         if (type is not (RegistryValueKind.String or RegistryValueKind.ExpandString))
             throw new IOException("문자열 자동 실행 등록값만 변경할 수 있습니다.");
+        if (action == "delete")
+        {
+            from.DeleteValue(item.Name, throwOnMissingValue: true);
+            return;
+        }
         to.SetValue(item.Name, value, type);
         try { from.DeleteValue(item.Name, throwOnMissingValue: true); }
         catch
@@ -130,7 +152,66 @@ internal static class MaintenanceActions
         }
     }
 
-    private static async Task ChangeElevated(string page, InventoryEntry item, string action)
+    private static bool IsUserStartupFolder(InventoryEntry item) =>
+        !string.IsNullOrEmpty(UserStartup) && (item.Location == UserStartup || item.Location == DisabledStartup);
+
+    private static void ChangeStartupFile(InventoryEntry item, string action)
+    {
+        var source = Path.Combine(item.Location, item.Name);
+        if (item.Target != source || Path.GetFileName(item.Name) != item.Name)
+            throw new IOException("시작 폴더 항목이 변경되었습니다. 다시 검사하세요.");
+
+        var info = new FileInfo(source);
+        if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.System | FileAttributes.Directory)) != 0
+            || info.LastWriteTimeUtc != item.StartupFileModifiedUtc)
+            throw new IOException("시작 폴더 항목이 변경되었거나 보호된 항목입니다.");
+
+        for (var folder = info.Directory; folder is not null; folder = folder.Parent)
+            if ((folder.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("연결 경로에 있는 시작 폴더 항목은 변경할 수 없습니다.");
+
+        if (action == "delete")
+        {
+            using (info.Open(FileMode.Open, FileAccess.Read, FileShare.None)) { }
+            FileSystem.DeleteFile(source, UIOption.AllDialogs, RecycleOption.SendToRecycleBin, UICancelOption.ThrowException);
+            if (File.Exists(source))
+                throw new IOException("원래 위치에 파일이 남아 있습니다.");
+            return;
+        }
+
+        var destination = action == "restore" ? UserStartup : DisabledStartup;
+        Directory.CreateDirectory(destination);
+        if ((File.GetAttributes(destination) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("연결 경로로 시작 항목을 이동할 수 없습니다.");
+        File.Move(source, Path.Combine(destination, item.Name));
+    }
+
+    private static Task ChangeMachineRun(InventoryEntry item, string action)
+    {
+        var view = item.Location.Contains("Registry32", StringComparison.Ordinal) ? "Registry32" : "Registry64";
+        var source = item.State == "비활성" ? DisabledRunKey : RunKey;
+        var destination = action == "restore" ? RunKey : DisabledRunKey;
+        return RunElevated($$"""
+            $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', '{{view}}')
+            $from = $base.OpenSubKey({{Quote(source)}}, $true)
+            $name = {{Quote(item.Name)}}
+            if ($null -eq $from) { throw 'Startup registration changed' }
+            $value = $from.GetValue($name, $null, 'DoNotExpandEnvironmentNames')
+            if ($value -isnot [string] -or $value -cne {{Quote(item.Detail!)}}) { throw 'Startup registration changed' }
+            $kind = $from.GetValueKind($name)
+            if ($kind -notin @('String','ExpandString')) { throw 'Unsupported registry value kind' }
+            if ({{Quote(action)}} -eq 'delete') { $from.DeleteValue($name, $true) }
+            else {
+                $to = $base.CreateSubKey({{Quote(destination)}})
+                if ($null -ne $to.GetValue($name)) { throw 'Destination exists' }
+                $to.SetValue($name, $value, $kind)
+                try { $from.DeleteValue($name, $true) }
+                catch { $to.DeleteValue($name, $false); throw }
+            }
+            """);
+    }
+
+    private static Task ChangeElevated(string page, InventoryEntry item, string action)
     {
         var quotedName = Quote(item.Id);
         string body;
@@ -175,6 +256,11 @@ internal static class MaintenanceActions
                 """;
         }
 
+        return RunElevated(body);
+    }
+
+    private static async Task RunElevated(string body)
+    {
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"))
         {
             UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden

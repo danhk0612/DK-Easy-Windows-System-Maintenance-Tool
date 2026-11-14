@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         InitializeInventory();
+        InitializeAntivirusTree();
         NavigationList.SelectedIndex = 0;
         try
         {
@@ -137,6 +138,7 @@ public partial class MainWindow : Window
         ScanProgress.Visibility = Visibility.Visible;
         try
         {
+            var completedStages = 0;
             var current = new System.Collections.Generic.Dictionary<string, string[]>();
             SystemOverview? overview = null;
             int? eventCount = null;
@@ -144,7 +146,7 @@ public partial class MainWindow : Window
             foreach (var stage in stages)
             {
                 token.ThrowIfCancellationRequested();
-                StatusText.Text = $"{ScanProgress.Value + 1}/{stages.Length} · {PageName(stage)} 조회 중…";
+                StatusText.Text = $"{completedStages + 1}/{stages.Length} · {PageName(stage)} 조회 중…";
                 try
                 {
                     switch (stage)
@@ -168,8 +170,21 @@ public partial class MainWindow : Window
                         case "storage":
                             if (scanDrive is null)
                                 throw new IOException("조회 가능한 드라이브가 없습니다.");
-                            storage = await Task.Run(
-                                () => StorageScan.Run(scanDrive, scanSettings.FileThreshold, scanSettings.FolderThreshold, token), token);
+                            var storageStage = completedStages;
+                            ScanProgress.IsIndeterminate = true;
+                            StatusText.Text = "저장 공간 · 최상위 항목 집계 중…";
+                            var progress = new Progress<(int Done, int Total, string Path)>(value =>
+                            {
+                                if (scanCancellation != cancellation || token.IsCancellationRequested || completedStages != storageStage)
+                                    return;
+                                ScanProgress.IsIndeterminate = value.Total == 0;
+                                var fraction = value.Total == 0 ? 0 : (double)value.Done / value.Total;
+                                ScanProgress.Value = storageStage + fraction;
+                                StatusText.Text = value.Total == 0 ? $"저장 공간 · {value.Path} 조회 중…" :
+                                    $"저장 공간 · {fraction:P0} · 최상위 {value.Done:N0}/{value.Total:N0} · {value.Path}";
+                            });
+                            storage = await Task.Run(() => StorageScan.RunWithProgress(
+                                scanDrive, scanSettings.FileThreshold, scanSettings.FolderThreshold, token, progress), token);
                             token.ThrowIfCancellationRequested();
                             storageResults[scanDrive] = storage;
                             inventoryErrors.Remove(stage);
@@ -214,7 +229,8 @@ public partial class MainWindow : Window
                     }
                 }
                 RefreshOverviewCounts();
-                ScanProgress.Value++;
+                ScanProgress.IsIndeterminate = false;
+                ScanProgress.Value = ++completedStages;
                 if (stage == activePage)
                     RefreshInventory();
             }
@@ -254,6 +270,7 @@ public partial class MainWindow : Window
             DriveSelect.IsEnabled = true;
             ExportButton.IsEnabled = events is not null;
             CancelScanButton.Visibility = Visibility.Collapsed;
+            ScanProgress.IsIndeterminate = false;
             ScanProgress.Visibility = Visibility.Collapsed;
         }
     }

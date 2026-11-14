@@ -35,7 +35,11 @@ internal static class StorageScan
     internal static string UserTemp => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp");
 
-    internal static StorageResult Run(string root, int fileGiB, int folderGiB, CancellationToken token)
+    internal static StorageResult Run(string root, int fileGiB, int folderGiB, CancellationToken token) =>
+        RunWithProgress(root, fileGiB, folderGiB, token, null);
+
+    internal static StorageResult RunWithProgress(string root, int fileGiB, int folderGiB,
+        CancellationToken token, IProgress<(int Done, int Total, string Path)>? progress)
     {
         var large = new PriorityQueue<StorageEntry, long>();
         var temporary = new PriorityQueue<StorageEntry, long>();
@@ -43,7 +47,22 @@ internal static class StorageScan
         var tempCount = 0;
         var tempBytes = 0L;
 
-        long Visit(DirectoryInfo directory, bool temp, bool includeDirectory)
+        var rootDirectory = new DirectoryInfo(root);
+        var scanTemp = Directory.Exists(UserTemp)
+            && !string.IsNullOrWhiteSpace(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var completed = 0;
+        var total = 0;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        void Report(string path, bool force = false)
+        {
+            if (!force && clock.ElapsedMilliseconds < 200)
+                return;
+            clock.Restart();
+            progress?.Report((completed, total, path));
+        }
+
+        long Visit(DirectoryInfo directory, bool temp, bool includeDirectory, bool reportRoot = false)
         {
             token.ThrowIfCancellationRequested();
             long bytes = 0;
@@ -55,9 +74,25 @@ internal static class StorageScan
                     return 0;
                 }
 
-                foreach (var entry in directory.EnumerateFileSystemInfos())
+                IEnumerable<FileSystemInfo> entries = directory.EnumerateFileSystemInfos();
+                if (reportRoot && progress is not null)
+                {
+                    var rootEntries = new List<FileSystemInfo>();
+                    foreach (var entry in entries)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        rootEntries.Add(entry);
+                    }
+                    total = rootEntries.Count + (scanTemp ? 1 : 0);
+                    entries = rootEntries;
+                    Report(directory.FullName, force: true);
+                }
+
+                foreach (var entry in entries)
                 {
                     token.ThrowIfCancellationRequested();
+                    if (reportRoot)
+                        Report(entry.FullName);
                     try
                     {
                         if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
@@ -90,6 +125,11 @@ internal static class StorageScan
                     {
                         skipped++;
                     }
+                    finally
+                    {
+                        if (reportRoot)
+                            completed++;
+                    }
                 }
 
                 if (includeDirectory && bytes >= folderGiB * GiB)
@@ -102,9 +142,14 @@ internal static class StorageScan
             return bytes;
         }
 
-        Visit(new DirectoryInfo(root), false, false);
-        if (Directory.Exists(UserTemp) && !string.IsNullOrWhiteSpace(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)))
+        Visit(rootDirectory, false, false, reportRoot: true);
+        if (scanTemp)
+        {
+            Report(UserTemp, force: true);
             Visit(new DirectoryInfo(UserTemp), true, false);
+            completed++;
+        }
+        Report(root, force: true);
         return new StorageResult(Sort(large), Sort(temporary), tempBytes, tempCount, skipped);
     }
 
