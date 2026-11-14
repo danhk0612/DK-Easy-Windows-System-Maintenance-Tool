@@ -98,6 +98,7 @@ public partial class MainWindow
             FilterSwitch.Content = page == "storage" ? "임시파일 보기" : "Windows 항목 포함";
             FilterSwitch.IsChecked = filters.Contains(page);
             OpenLocationButton.Visibility = page is "storage" or "startup" or "apps" ? Visibility.Visible : Visibility.Collapsed;
+            UnlockButton.Visibility = page == "storage" ? Visibility.Visible : Visibility.Collapsed;
             ManageButton.Visibility = page == "history" ? Visibility.Collapsed : Visibility.Visible;
             ManageButton.Content = page == "apps" ? "선택 항목 관리" :
                 page == "storage" ? "휴지통으로 이동" : "선택 항목 관리";
@@ -190,6 +191,7 @@ public partial class MainWindow
             return;
         var selection = InventoryGrid.SelectedItem;
         InventoryDetails.IsEnabled = selection is not null;
+        UnlockButton.IsEnabled = !InspectionBusy && selection is StorageEntry { Kind: not "폴더" };
         OpenLocationButton.IsEnabled = selection is StorageEntry || selection is InventoryEntry { Target: not null };
         ManageButton.IsEnabled = !InspectionBusy && (activePage == "apps"
             || selection is StorageEntry || selection is InventoryEntry);
@@ -302,6 +304,8 @@ public partial class MainWindow
                     TempCount = file.Kind == "임시파일" ? old.TempCount - 1 : old.TempCount,
                     TempBytes = file.Kind == "임시파일" ? old.TempBytes - file.Bytes : old.TempBytes
                 };
+                managing = true;
+                RefreshInspectionButtons();
                 var cacheError = scanTimes.TryGetValue(StorageCacheKey(drive), out var previousScan)
                     ? await SaveScanResultAsync(StorageCacheKey(drive), storageResults[drive], previousScan) : null;
                 RefreshInventory();

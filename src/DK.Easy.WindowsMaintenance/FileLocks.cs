@@ -104,10 +104,10 @@ internal static class FileLocks
         [MarshalAs(UnmanagedType.Bool)] internal bool Restartable;
     }
 
-    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int RmStartSession(out uint session, int flags, StringBuilder key);
 
-    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)]
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int RmRegisterResources(uint session, uint fileCount, string[] files,
         uint appCount, IntPtr applications, uint serviceCount, IntPtr services);
 

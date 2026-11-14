@@ -145,6 +145,8 @@ public partial class MainWindow
                         StatusText.Text = message;
                 });
                 await Task.Run(() => AntivirusEngine.UpdateAsync(progress, cancellation.Token));
+                if (lastAntivirusReport is { } report)
+                    ShowAntivirusReport(report);
                 StatusText.Text = "ClamAV 엔진 및 악성코드 정의 준비 완료";
             }
             else

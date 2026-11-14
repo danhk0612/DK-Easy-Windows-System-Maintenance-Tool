@@ -133,6 +133,12 @@ public partial class MainWindow
         }
     }
 
+    private void Unlock_Click(object sender, RoutedEventArgs e)
+    {
+        if (InventoryGrid.SelectedItem is StorageEntry { Kind: not "폴더" } file)
+            UnlockFileAsync(file.Path);
+    }
+
     private async void UnlockFileAsync(string path)
     {
         if (InspectionBusy)

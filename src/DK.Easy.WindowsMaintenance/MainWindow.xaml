@@ -164,6 +164,7 @@
                                   AutomationProperties.Name="검사할 드라이브" SelectionChanged="Drive_Changed" />
                         <Button x:Name="InspectPageButton" Content="현재 항목 검사" Click="InspectPage_Click" Margin="0,0,8,0" />
                         <Button x:Name="OpenLocationButton" Content="위치 열기" Click="OpenLocation_Click" Margin="0,0,8,0" />
+                        <Button x:Name="UnlockButton" Content="잠금 확인 / 해제" Click="Unlock_Click" Visibility="Collapsed" Margin="0,0,8,0" />
                         <Button x:Name="ManageButton" Content="선택 항목 관리" Click="Manage_Click" Margin="0,0,8,0" />
                         <CheckBox x:Name="FilterSwitch" Style="{StaticResource Switch}" VerticalAlignment="Center"
                                   Checked="Filter_Changed" Unchecked="Filter_Changed" />
