@@ -6,9 +6,6 @@
         <SolidColorBrush x:Key="Ink" Color="#17283D" />
         <SolidColorBrush x:Key="Muted" Color="#4F6379" />
         <SolidColorBrush x:Key="Accent" Color="#086A64" />
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Ink}" />
-        </Style>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="White" />
             <Setter Property="BorderBrush" Value="#DCE5ED" />

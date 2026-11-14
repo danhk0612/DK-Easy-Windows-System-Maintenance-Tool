@@ -4,7 +4,7 @@
         Title="DK Easy Windows System Maintenance Tool" Icon="Assets/Maintenance.ico"
         Width="1120" Height="740" MinWidth="800" MinHeight="580"
         WindowStartupLocation="CenterScreen" FontFamily="Segoe UI, Malgun Gothic" FontSize="14"
-        Background="#F2F6FA" Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed"
+        Foreground="{StaticResource Ink}" Background="#F2F6FA" Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed"
         StateChanged="Window_StateChanged">
     <Grid>
         <Grid.ColumnDefinitions>
