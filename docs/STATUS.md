@@ -31,6 +31,8 @@
 
 - GitHub Actions의 Windows 러너에서 Debug 빌드, x64 프레임워크 종속 게시, 시스템·저장 공간·이벤트 조회, 시작 프로그램·설치 앱·서비스·예약 작업 조회, 테스트 시작 항목 비활성화·원본 복원 및 최근 12회 기록 보존을 확인했다. [실행 결과](https://github.com/danhk0612/DK-Easy-Windows-System-Maintenance-Tool/actions/runs/43565750535)
 
+- [v0.1.0 프리릴리스](https://github.com/danhk0612/DK-Easy-Windows-System-Maintenance-Tool/releases/tag/v0.1.0)를 배포했다. [배포 실행](https://github.com/danhk0612/DK-Easy-Windows-System-Maintenance-Tool/actions/runs/43566285084)에서 Windows 통합 테스트, ZIP 구성·버전·해시, 게시된 자산을 확인했다.
+
 ## 다음 작업
 
-[M9 검증 체크리스트](TEST_CHECKLIST.md)에 따라 일반 Windows 세션과 테스트 VM에서 실제 조회·변경·복원 결과를 확인한다.
+[Windows 실기 테스트](MANUAL_TESTS.md)의 항목을 확인한다. 문제를 수정한 뒤 같은 항목을 다시 검증하고 다음 버전에 반영한다.
