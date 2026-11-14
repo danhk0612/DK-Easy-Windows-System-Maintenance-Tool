@@ -13,17 +13,8 @@
         </Grid.ColumnDefinitions>
         <Border Background="#14263B">
             <DockPanel Margin="12,18,12,14">
-                <StackPanel DockPanel.Dock="Top" Margin="7,0,0,16" Orientation="Horizontal">
-                    <Image Source="Assets/Maintenance.ico" Width="32" Height="32" Margin="0,0,8,0" />
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="DK Easy" Foreground="White" FontWeight="Bold" FontSize="17" />
-                        <TextBlock Text="Windows 시스템 점검" Foreground="#B7CADB" FontSize="11" />
-                    </StackPanel>
-                </StackPanel>
-                <ListBox x:Name="NavigationList" Background="Transparent" BorderThickness="0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="Navigation_Changed">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
+                <DockPanel.Resources>
+                        <Style x:Key="NavigationItemStyle" TargetType="ListBoxItem">
                             <Setter Property="Foreground" Value="#E6EFF7" />
                             <Setter Property="Padding" Value="11,8" />
                             <Setter Property="Margin" Value="0,1" />
@@ -49,7 +40,25 @@
                                 </Setter.Value>
                             </Setter>
                         </Style>
-                    </ListBox.ItemContainerStyle>
+                </DockPanel.Resources>
+                <StackPanel DockPanel.Dock="Top" Margin="7,0,0,16" Orientation="Horizontal">
+                    <Image Source="Assets/Maintenance.ico" Width="32" Height="32" Margin="0,0,8,0" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="DK Easy" Foreground="White" FontWeight="Bold" FontSize="17" />
+                        <TextBlock Text="Windows 시스템 점검" Foreground="#B7CADB" FontSize="11" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom">
+                    <Separator Margin="4,8" Background="#496176" />
+                    <ListBox x:Name="UtilityNavigationList" Background="Transparent" BorderThickness="0"
+                             ItemContainerStyle="{StaticResource NavigationItemStyle}" SelectionChanged="Navigation_Changed">
+                        <ListBoxItem Tag="history" Content="점검 기록" />
+                        <ListBoxItem Tag="settings" Content="설정" />
+                    </ListBox>
+                </StackPanel>
+                <ListBox x:Name="NavigationList" Background="Transparent" BorderThickness="0"
+                         ItemContainerStyle="{StaticResource NavigationItemStyle}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="Navigation_Changed">
                     <ListBoxItem Tag="dashboard" Content="대시보드" />
                     <ListBoxItem Tag="events" Content="시스템 문제" />
                     <ListBoxItem Tag="storage" Content="저장 공간" />
@@ -58,8 +67,6 @@
                     <ListBoxItem Tag="tasks" Content="예약 작업" />
                     <ListBoxItem Tag="apps" Content="설치 프로그램" />
                     <ListBoxItem Tag="antivirus" Content="바이러스 검사" />
-                    <ListBoxItem Tag="history" Content="점검 기록" />
-                    <ListBoxItem Tag="settings" Content="설정" />
                 </ListBox>
             </DockPanel>
         </Border>
@@ -74,8 +81,10 @@
                         Content="전체 검사" Click="Scan_Click" VerticalAlignment="Center" />
                 <Button x:Name="OverviewScanButton" DockPanel.Dock="Right" Content="현재 항목 검사"
                         Click="InspectPage_Click" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <TextBlock x:Name="PageTitle" Text="대시보드" FontSize="27" FontWeight="SemiBold"
-                           VerticalAlignment="Center" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="PageTitle" Text="대시보드" FontSize="27" FontWeight="SemiBold" />
+                    <TextBlock x:Name="PageScanTime" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
+                </StackPanel>
             </DockPanel>
             <ScrollViewer x:Name="DashboardPage" Grid.Row="1" VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">

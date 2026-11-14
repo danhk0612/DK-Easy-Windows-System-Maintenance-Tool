@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -18,8 +17,7 @@ internal static class AntivirusEngine
 {
     private const string ReleaseEndpoint = "https://api.github.com/repos/Cisco-Talos/clamav/releases/latest";
     private const string DownloadRoot = "https://github.com/Cisco-Talos/clamav/releases/download/";
-    private static readonly string Root = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DKEasyWindowsMaintenance", "ClamAV");
+    internal static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "ClamAV");
     private static readonly string Database = Path.Combine(Root, "database");
     private static readonly string CurrentFile = Path.Combine(Root, "current.txt");
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(3) };
@@ -119,8 +117,8 @@ internal static class AntivirusEngine
         }
     }
 
-    internal static async Task<(int ExitCode, string Output)> ScanAsync(
-        string target, IProgress<(long Done, long Total)> progress, CancellationToken token)
+    internal static async Task<(int ExitCode, string Output, long Processed)> ScanAsync(
+        string target, long previousCount, IProgress<(long Done, long Total)> progress, CancellationToken token)
     {
         using var operationLock = AcquireLock();
         var current = CurrentVersion() ?? throw new IOException("먼저 ClamAV 엔진을 다운로드하세요.");
@@ -128,7 +126,7 @@ internal static class AntivirusEngine
         for (string? part = fullPath; part is not null; part = Path.GetDirectoryName(part))
             if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("연결 경로는 검사 대상에 지정할 수 없습니다.");
-        var total = CountFiles(fullPath, token);
+        var total = Directory.Exists(fullPath) ? previousCount : 1;
         progress.Report((0, total));
         var completed = 0L;
         var clock = Stopwatch.StartNew();
@@ -138,50 +136,22 @@ internal static class AntivirusEngine
             if (clock.ElapsedMilliseconds < 200)
                 return;
             clock.Restart();
-            progress.Report((Math.Min(completed, total), total));
+            progress.Report((completed, total));
         }
 
-        return await RunProcessAsync(Path.Combine(Root, current), "clamscan.exe", token, ReportFile,
+        var result = await RunProcessAsync(Path.Combine(Root, current), "clamscan.exe", token, ReportFile,
             "--recursive", "--cross-fs=no", "--follow-dir-symlinks=0", "--follow-file-symlinks=0",
             "--official-db-only=yes", "--database=" + Database, "--", fullPath);
-    }
-
-    private static long CountFiles(string path, CancellationToken token)
-    {
-        if (!Directory.Exists(path))
-            return 1;
-
-        var pending = new Stack<string>();
-        pending.Push(path);
-        var count = 0L;
-        while (pending.TryPop(out var directory))
-        {
-            token.ThrowIfCancellationRequested();
-            try
-            {
-                foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
-                {
-                    token.ThrowIfCancellationRequested();
-                    try
-                    {
-                        if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                            continue;
-                        if (entry is DirectoryInfo)
-                            pending.Push(entry.FullName);
-                        else
-                            count++;
-                    }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-                }
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-        }
-        return count;
+        return (result.ExitCode, result.Output, completed);
     }
 
     private static FileStream AcquireLock()
     {
-        Directory.CreateDirectory(Root);
+        try { Directory.CreateDirectory(Root); }
+        catch (UnauthorizedAccessException error)
+        {
+            throw new IOException($"엔진 폴더에 쓸 수 없습니다: {Root}", error);
+        }
         try { return File.Open(Path.Combine(Root, "operation.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
         catch (IOException error) { throw new IOException("ClamAV 작업을 시작할 수 없습니다. 다른 앱 창에서 실행 중인지 확인하세요.", error); }
     }

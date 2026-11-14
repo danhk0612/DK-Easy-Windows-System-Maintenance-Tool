@@ -161,7 +161,10 @@ public partial class MainWindow
     private void Drive_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (activePage == "storage")
+        {
             RefreshInventory();
+            RefreshScanTime();
+        }
     }
 
     private void Filter_Changed(object sender, RoutedEventArgs e)
@@ -299,8 +302,12 @@ public partial class MainWindow
                     TempCount = file.Kind == "임시파일" ? old.TempCount - 1 : old.TempCount,
                     TempBytes = file.Kind == "임시파일" ? old.TempBytes - file.Bytes : old.TempBytes
                 };
+                var cacheError = scanTimes.TryGetValue(StorageCacheKey(drive), out var previousScan)
+                    ? await SaveScanResultAsync(StorageCacheKey(drive), storageResults[drive], previousScan) : null;
                 RefreshInventory();
                 StatusText.Text = "휴지통으로 이동했습니다. 폴더 합계를 갱신하려면 다시 검사하세요.";
+                if (cacheError is not null)
+                    StatusText.Text += $" · 기록 저장 실패: {cacheError}";
                 return;
             }
 
