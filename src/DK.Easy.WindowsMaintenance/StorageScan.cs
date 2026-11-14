@@ -8,7 +8,20 @@ namespace DK.Easy.WindowsMaintenance;
 
 internal sealed record StorageEntry(string Path, string Kind, long Bytes, DateTime ModifiedUtc)
 {
-    public string Size => $"{Bytes / (1024.0 * 1024):N1} MiB";
+    public string Size => FormatSize(Bytes);
+
+    internal static string FormatSize(long bytes)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+        var value = (double)bytes;
+        var unit = 0;
+        while (Math.Abs(value) >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+        return $"{value:0.##} {units[unit]}";
+    }
     public DateTime Modified => ModifiedUtc.ToLocalTime();
 }
 
