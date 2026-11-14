@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics.Eventing.Reader;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeInventory();
         NavigationList.SelectedIndex = 0;
         try
         {
@@ -43,6 +45,8 @@ public partial class MainWindow : Window
         LaunchSetting.IsChecked = settings.CheckOnLaunch;
         WarningSetting.IsChecked = settings.IncludeWarnings;
         DaysSetting.SelectedIndex = Array.IndexOf(Periods, settings.EventDays);
+        FileThreshold.Text = settings.FileThreshold.ToString();
+        FolderThreshold.Text = settings.FolderThreshold.ToString();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -93,17 +97,9 @@ public partial class MainWindow : Window
         DashboardPage.Visibility = page == "dashboard" ? Visibility.Visible : Visibility.Collapsed;
         EventsPage.Visibility = page == "events" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
-        PendingPage.Visibility = page is "dashboard" or "events" or "settings" ? Visibility.Collapsed : Visibility.Visible;
-        PendingText.Text = page switch
-        {
-            "storage" => "대용량 파일·폴더 및 임시파일 조회는 준비 중입니다. 시스템 드라이브 용량은 대시보드에서 확인할 수 있습니다.",
-            "startup" => "시작 프로그램 조회 및 관리는 준비 중입니다.",
-            "services" => "서비스 조회 및 관리는 준비 중입니다.",
-            "tasks" => "예약 작업 조회 및 관리는 준비 중입니다.",
-            "apps" => "설치 프로그램 조회 및 제거 도구 연결은 준비 중입니다.",
-            "history" => "점검 기록 저장과 이전 점검 비교는 준비 중입니다.",
-            _ => ""
-        };
+        activePage = page;
+        InventoryPage.Visibility = page is "dashboard" or "events" or "settings" ? Visibility.Collapsed : Visibility.Visible;
+        RefreshInventory();
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e) => await RunScanAsync();
@@ -115,9 +111,9 @@ public partial class MainWindow : Window
         StatusText.Text = "검사 취소 중…";
     }
 
-    private async Task RunScanAsync()
+    private async Task RunScanAsync(string? only = null, bool afterManagement = false)
     {
-        if (scanCancellation is not null)
+        if (scanCancellation is not null || (managing && !afterManagement))
             return;
 
         using var cancellation = new CancellationTokenSource();
@@ -125,6 +121,12 @@ public partial class MainWindow : Window
         var token = cancellation.Token;
         var scanSettings = settings;
         var failures = 0;
+        var stages = only is null ? new[] { "dashboard", "events", "storage", "startup", "services", "tasks", "apps" } : new[] { only };
+        var scanDrive = (string?)DriveSelect.SelectedItem;
+        ScanProgress.Maximum = stages.Length;
+        InspectPageButton.IsEnabled = false;
+        DriveSelect.IsEnabled = false;
+        ManageButton.IsEnabled = false;
         ScanButton.IsEnabled = false;
         if (trayScan is not null)
             trayScan.Enabled = false;
@@ -133,51 +135,109 @@ public partial class MainWindow : Window
         CancelScanButton.Visibility = Visibility.Visible;
         ScanProgress.Value = 0;
         ScanProgress.Visibility = Visibility.Visible;
-        StatusText.Text = "1/2 · 시스템 정보 및 드라이브 조회 중…";
         try
         {
-            try
+            var current = new System.Collections.Generic.Dictionary<string, string[]>();
+            SystemOverview? overview = null;
+            int? eventCount = null;
+            StorageResult? storage = null;
+            foreach (var stage in stages)
             {
-                var overview = await Task.Run(MaintenanceScan.ReadOverview, token);
                 token.ThrowIfCancellationRequested();
-                ShowOverview(overview);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-            {
-                failures++;
-                ComputerText.Text = "시스템 정보 조회 실패";
-                WindowsText.Text = error.Message;
-                DriveHeading.Text = "시스템 드라이브";
-                DriveSpace.Text = "용량 조회 실패";
-                DriveUsage.Visibility = Visibility.Collapsed;
+                StatusText.Text = $"{ScanProgress.Value + 1}/{stages.Length} · {PageName(stage)} 조회 중…";
+                try
+                {
+                    switch (stage)
+                    {
+                        case "dashboard":
+                            overview = await Task.Run(MaintenanceScan.ReadOverview, token);
+                            token.ThrowIfCancellationRequested();
+                            ShowOverview(overview);
+                            break;
+                        case "events":
+                            var snapshot = await Task.Run(
+                                () => MaintenanceScan.ReadSystemEvents(scanSettings.EventDays, scanSettings.IncludeWarnings, token), token);
+                            token.ThrowIfCancellationRequested();
+                            events = snapshot;
+                            eventCount = snapshot.Entries.Count;
+                            EventsGrid.ItemsSource = snapshot.Entries;
+                            EventSummary.Text = $"최근 {scanSettings.EventDays}일 · {snapshot.Entries.Count:N0}건"
+                                + (snapshot.IncludesWarnings ? " · 경고 포함" : " · 심각·오류 및 문제 보고")
+                                + (snapshot.IsTruncated ? " · 최신 200건만 표시" : "");
+                            break;
+                        case "storage":
+                            if (scanDrive is null)
+                                throw new IOException("조회 가능한 드라이브가 없습니다.");
+                            storage = await Task.Run(
+                                () => StorageScan.Run(scanDrive, scanSettings.FileThreshold, scanSettings.FolderThreshold, token), token);
+                            token.ThrowIfCancellationRequested();
+                            storageResults[scanDrive] = storage;
+                            inventoryErrors.Remove(stage);
+                            break;
+                        default:
+                            var rows = await Task.Run(() => CollectInventory(stage, token), token);
+                            token.ThrowIfCancellationRequested();
+                            inventoryResults[stage] = rows;
+                            current[stage] = rows.Select(row => row.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                            inventoryErrors.Remove(stage);
+                            break;
+                    }
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or EventLogException
+                    or System.Security.SecurityException or Win32Exception or JsonException)
+                {
+                    failures++;
+                    if (stage == "dashboard")
+                    {
+                        ComputerText.Text = "시스템 정보 조회 실패";
+                        WindowsText.Text = error.Message;
+                        DriveHeading.Text = "시스템 드라이브";
+                        DriveSpace.Text = "용량 조회 실패";
+                        DriveUsage.Visibility = Visibility.Collapsed;
+                    }
+                    else if (stage == "events")
+                    {
+                        events = null;
+                        EventsGrid.ItemsSource = null;
+                        EventSummary.Text = $"이벤트 로그 조회 실패 · {error.Message}";
+                    }
+                    else
+                    {
+                        inventoryErrors[stage] = error.Message;
+                        inventoryResults.Remove(stage);
+                        if (stage == "storage" && scanDrive is not null)
+                            storageResults.Remove(scanDrive);
+                    }
+                }
+                RefreshOverviewCounts();
+                ScanProgress.Value++;
+                if (stage == activePage)
+                    RefreshInventory();
             }
 
             token.ThrowIfCancellationRequested();
-            ScanProgress.Value = 1;
-            StatusText.Text = "2/2 · 시스템·응용 프로그램 이벤트 로그 조회 중…";
-            try
+            string? historyError = null;
+            if (only is null && failures < stages.Length)
             {
-                var snapshot = await Task.Run(
-                    () => MaintenanceScan.ReadSystemEvents(scanSettings.EventDays, scanSettings.IncludeWarnings, token), token);
-                token.ThrowIfCancellationRequested();
-                events = snapshot;
-                EventsGrid.ItemsSource = snapshot.Entries;
-                EventSummary.Text = $"최근 {scanSettings.EventDays}일 · {snapshot.Entries.Count:N0}건"
-                    + (snapshot.IncludesWarnings ? " · 경고 포함" : " · 심각·오류 및 문제 보고")
-                    + (snapshot.IsTruncated ? " · 최신 200건만 표시" : "");
-            }
-            catch (Exception error) when (error is EventLogException or UnauthorizedAccessException)
-            {
-                failures++;
-                events = null;
-                EventsGrid.ItemsSource = null;
-                EventSummary.Text = $"이벤트 로그 조회 실패 · {error.Message}";
+                try
+                {
+                    var entry = new InventorySnapshot(DateTimeOffset.Now, overview?.Free,
+                        storage?.Large.Count, storage?.TempCount, eventCount, current);
+                    history = await Task.Run(() => InspectionHistory.Add(entry));
+                    inventoryErrors.Remove("history");
+                    if (activePage == "history")
+                        RefreshInventory();
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    historyError = error.Message;
+                }
             }
 
-            ScanProgress.Value = 2;
-            var result = failures switch { 0 => "검사 완료", 1 => "검사 완료 · 1개 단계 조회 실패", _ => "검사 실패 · 2개 단계 조회 실패" };
-            LastScanText.Text = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} · {result}";
-            StatusText.Text = result;
+            var result = failures == 0 ? "검사 완료" : $"검사 종료 · {failures}/{stages.Length}개 조회 실패";
+            if (only is null)
+                LastScanText.Text = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} · {result}";
+            StatusText.Text = historyError is null ? result : $"{result} · 기록 저장 실패: {historyError}";
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -189,6 +249,9 @@ public partial class MainWindow : Window
             if (trayScan is not null)
                 trayScan.Enabled = true;
             ScanButton.IsEnabled = true;
+            InspectPageButton.IsEnabled = true;
+            DriveSelect.IsEnabled = true;
+            UpdateInventorySelection();
             ExportButton.IsEnabled = events is not null;
             CancelScanButton.Visibility = Visibility.Collapsed;
             ScanProgress.Visibility = Visibility.Collapsed;
@@ -270,9 +333,16 @@ public partial class MainWindow : Window
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
+        if (!int.TryParse(FileThreshold.Text, out var fileGiB) || fileGiB is < 1 or > 1024
+            || !int.TryParse(FolderThreshold.Text, out var folderGiB) || folderGiB is < 1 or > 1024)
+        {
+            MessageBox.Show(this, "크기 기준은 1~1024 사이의 정수(GiB)를 입력하세요.", "설정", MessageBoxButton.OK);
+            return;
+        }
+
         var updated = new MaintenanceSettings((CloseBehavior)CloseSetting.SelectedIndex,
             MinimizeSetting.IsChecked == true, LaunchSetting.IsChecked == true,
-            Periods[DaysSetting.SelectedIndex], WarningSetting.IsChecked == true);
+            Periods[DaysSetting.SelectedIndex], WarningSetting.IsChecked == true, fileGiB, folderGiB);
         try
         {
             updated.Save();

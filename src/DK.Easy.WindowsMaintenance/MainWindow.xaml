@@ -98,9 +98,10 @@
                     <Border Style="{StaticResource Card}" Margin="0,9,0,0">
                         <Expander Header="검사 범위 및 마지막 검사">
                             <StackPanel Margin="0,8,0,0">
-                                <TextBlock Text="전체 검사는 시스템 정보·시스템 드라이브 용량·시스템·응용 프로그램 이벤트 로그를 조회합니다."
+                                <TextBlock Text="전체 검사는 선택 드라이브, 시스템 문제, 시작 프로그램, 서비스, 예약 작업, 설치 앱을 조회하고 기록을 저장합니다."
                                            Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
                                 <TextBlock x:Name="LastScanText" Text="마지막 검사 · 미검사" Margin="0,6,0,0" />
+                                <TextBlock x:Name="OverviewCounts" Margin="0,6,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </Expander>
                     </Border>
@@ -137,9 +138,35 @@
                              Padding="8" Margin="0,6,0,0" AutomationProperties.Name="선택한 이벤트 설명" />
                 </Expander>
             </Grid>
-            <Border x:Name="PendingPage" Grid.Row="1" Style="{StaticResource Card}" VerticalAlignment="Top" Visibility="Collapsed">
-                <TextBlock x:Name="PendingText" TextWrapping="Wrap" />
-            </Border>
+            <Grid x:Name="InventoryPage" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,8">
+                    <WrapPanel>
+                        <ComboBox x:Name="DriveSelect" Width="104" Margin="0,0,8,0" VerticalContentAlignment="Center"
+                                  AutomationProperties.Name="검사할 드라이브" SelectionChanged="Drive_Changed" />
+                        <Button x:Name="InspectPageButton" Content="이 화면 검사" Click="InspectPage_Click" Margin="0,0,8,0" />
+                        <Button x:Name="OpenLocationButton" Content="위치 열기" Click="OpenLocation_Click" Margin="0,0,8,0" />
+                        <Button x:Name="ManageButton" Content="선택 항목 관리" Click="Manage_Click" Margin="0,0,8,0" />
+                        <CheckBox x:Name="FilterSwitch" Style="{StaticResource Switch}" VerticalAlignment="Center"
+                                  Checked="Filter_Changed" Unchecked="Filter_Changed" />
+                    </WrapPanel>
+                    <TextBlock x:Name="InventorySummary" Margin="0,6,0,0" Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
+                </StackPanel>
+                <DataGrid x:Name="InventoryGrid" Grid.Row="1" IsReadOnly="True" AutoGenerateColumns="False"
+                          SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
+                          SelectionChanged="InventorySelection_Changed" GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="#E6EDF3" Background="White" BorderBrush="#DCE5ED"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          AutomationProperties.Name="점검 결과 목록" />
+                <Expander x:Name="InventoryDetails" Grid.Row="2" Header="선택 항목 상세" Margin="0,8,0,0">
+                    <TextBox x:Name="InventoryDetailText" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130"
+                             VerticalScrollBarVisibility="Auto" Padding="8" Margin="0,6,0,0" />
+                </Expander>
+            </Grid>
             <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
@@ -173,6 +200,17 @@
                                     <ComboBoxItem Content="30일" />
                                 </ComboBox>
                             </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Margin="0,9,0,0">
+                        <StackPanel>
+                            <TextBlock Text="저장 공간" FontSize="18" FontWeight="SemiBold" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Label Content="큰 파일 (GiB)" Target="{Binding ElementName=FileThreshold}" />
+                                <TextBox x:Name="FileThreshold" Width="55" VerticalContentAlignment="Center" Margin="0,0,12,0" />
+                                <Label Content="큰 폴더 (GiB)" Target="{Binding ElementName=FolderThreshold}" />
+                                <TextBox x:Name="FolderThreshold" Width="55" VerticalContentAlignment="Center" />
+                            </WrapPanel>
                         </StackPanel>
                     </Border>
                     <Button Style="{StaticResource PrimaryButton}" Content="설정 저장" Click="SaveSettings_Click"

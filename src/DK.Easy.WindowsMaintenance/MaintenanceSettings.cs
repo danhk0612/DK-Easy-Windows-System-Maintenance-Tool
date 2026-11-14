@@ -11,7 +11,9 @@ internal sealed record MaintenanceSettings(
     bool MinimizeToTray = false,
     bool CheckOnLaunch = false,
     int EventDays = 7,
-    bool IncludeWarnings = false)
+    bool IncludeWarnings = false,
+    int FileThreshold = 1,
+    int FolderThreshold = 5)
 {
     private static readonly string SettingsFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -22,7 +24,8 @@ internal sealed record MaintenanceSettings(
         try
         {
             var settings = JsonSerializer.Deserialize<MaintenanceSettings>(File.ReadAllText(SettingsFile));
-            if (settings is null || !Enum.IsDefined(settings.CloseBehavior) || settings.EventDays is not (1 or 7 or 14 or 30))
+            if (settings is null || !Enum.IsDefined(settings.CloseBehavior) || settings.EventDays is not (1 or 7 or 14 or 30)
+                || settings.FileThreshold is < 1 or > 1024 || settings.FolderThreshold is < 1 or > 1024)
                 throw new JsonException("설정 값이 올바르지 않습니다.");
             return settings;
         }
