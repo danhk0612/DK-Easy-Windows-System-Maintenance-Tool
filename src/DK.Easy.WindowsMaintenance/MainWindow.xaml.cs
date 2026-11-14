@@ -106,7 +106,8 @@ public partial class MainWindow : Window
         activePage = page;
         AntivirusPage.Visibility = page == "antivirus" ? Visibility.Visible : Visibility.Collapsed;
         if (page == "antivirus") RefreshAntivirus();
-        InventoryPage.Visibility = page is "dashboard" or "events" or "settings" or "antivirus" ? Visibility.Collapsed : Visibility.Visible;
+        UnlockPage.Visibility = page == "unlock" ? Visibility.Visible : Visibility.Collapsed;
+        InventoryPage.Visibility = page is "dashboard" or "events" or "settings" or "antivirus" or "unlock" ? Visibility.Collapsed : Visibility.Visible;
         RefreshInventory();
         RefreshScanTime();
     }
@@ -420,6 +421,7 @@ public partial class MainWindow : Window
             tray.ContextMenuStrip?.Dispose();
             tray.Dispose();
         }
+        unlockCancellation?.Cancel();
         trayIcon?.Dispose();
     }
 }

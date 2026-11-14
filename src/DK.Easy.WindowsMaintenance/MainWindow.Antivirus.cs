@@ -28,6 +28,7 @@ public partial class MainWindow
             trayScan.Enabled = available;
         RefreshAntivirus();
         UpdateInventorySelection();
+        RefreshUnlockButtons();
     }
 
     private void RefreshAntivirus()

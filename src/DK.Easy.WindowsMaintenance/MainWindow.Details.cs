@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -70,8 +69,7 @@ public partial class MainWindow
         if (grid.SelectedItem is StorageEntry storage)
         {
             Add("경로 복사", () => CopyDetail(storage.Path));
-            if (storage.Kind != "폴더")
-                Add("파일 잠금 확인 / 해제", () => UnlockFileAsync(storage.Path), !InspectionBusy);
+            Add("잠금 해제에서 열기", () => OpenUnlockPath(storage.Path), !InspectionBusy);
             Add("이 위치 바이러스 검사", () => SelectAntivirusTarget(storage.Path), !InspectionBusy);
         }
         if (OpenLocationButton.Visibility == Visibility.Visible)
@@ -131,65 +129,6 @@ public partial class MainWindow
         catch (System.ComponentModel.Win32Exception error)
         {
             MessageBox.Show(this, error.Message, "Windows 관리 화면 열기 실패", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void Unlock_Click(object sender, RoutedEventArgs e)
-    {
-        if (InventoryGrid.SelectedItem is StorageEntry { Kind: not "폴더" } file)
-            UnlockFileAsync(file.Path);
-    }
-
-    private async void UnlockFileAsync(string path)
-    {
-        if (InspectionBusy)
-            return;
-        managing = true;
-        RefreshInspectionButtons();
-        try
-        {
-            for (string? parent = path; parent is not null; parent = Path.GetDirectoryName(parent))
-                if ((File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException("연결 경로의 파일은 잠금 해제를 할 수 없습니다.");
-            if (await Task.Run(() => FileLocks.IsAvailable(path)))
-            {
-                MessageBox.Show(this, "현재 잠겨 있지 않습니다.", "파일 잠금", MessageBoxButton.OK);
-                return;
-            }
-
-            var holders = await Task.Run(() => FileLocks.Find(path));
-            var list = new ListBox { ItemsSource = holders, DisplayMemberPath = nameof(FileLocks.Holder.Label), MinHeight = 95 };
-            var close = new Button { Content = "선택한 앱 닫기 요청", IsEnabled = false, Margin = new Thickness(0, 8, 0, 0) };
-            var cancel = new Button { Content = "닫기", IsCancel = true, Margin = new Thickness(0, 6, 0, 0) };
-            var panel = new StackPanel { Margin = new Thickness(14) };
-            panel.Children.Add(new TextBlock { Text = path, TextWrapping = TextWrapping.Wrap });
-            panel.Children.Add(new TextBlock { Text = holders.Length == 0
-                ? "Windows에서 이 파일을 사용 중인 앱을 찾지 못했습니다."
-                : "작업을 저장한 뒤 닫을 앱을 선택하세요. 앱에서 저장 확인이 뜰 수 있습니다.",
-                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) });
-            panel.Children.Add(list);
-            panel.Children.Add(close);
-            panel.Children.Add(cancel);
-            var dialog = new Window { Owner = this, Title = "파일 잠금 확인 / 해제", Content = panel, Width = 465,
-                SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-            list.SelectionChanged += (_, _) => close.IsEnabled = list.SelectedItem is FileLocks.Holder { CanClose: true };
-            close.Click += (_, _) => dialog.DialogResult = true;
-            if (dialog.ShowDialog() != true || list.SelectedItem is not FileLocks.Holder selected)
-                return;
-
-            var released = await Task.Run(() => FileLocks.RequestCloseAsync(path, selected));
-            MessageBox.Show(this, released ? "파일 잠금이 해제됐습니다."
-                : "파일이 아직 잠겨 있습니다. 앱의 저장 확인을 마치거나 다른 앱을 닫은 뒤 다시 확인하세요.",
-                "파일 잠금", MessageBoxButton.OK);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        {
-            MessageBox.Show(this, error.Message, "파일 잠금 확인 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        finally
-        {
-            managing = false;
-            RefreshInspectionButtons();
         }
     }
 }
