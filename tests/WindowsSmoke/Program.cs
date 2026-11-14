@@ -13,7 +13,9 @@ if (!string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true",
     throw new InvalidOperationException("Run this integration check in an isolated GitHub Actions runner.");
 
 var app = Assembly.LoadFrom(Path.GetFullPath(args.Single()));
-var root = Directory.CreateTempSubdirectory("dk-maintenance-");
+var root = Directory.CreateDirectory(Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+    "dk-maintenance-" + Guid.NewGuid().ToString("N")));
 var token = CancellationToken.None;
 try
 {
