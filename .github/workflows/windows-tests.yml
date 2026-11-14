@@ -1,0 +1,113 @@
+name: Windows tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Publish a prerelease, for example v0.1.0. Leave blank for tests only.'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build WPF solution
+        run: dotnet build DK.Easy.WindowsMaintenance.slnx -c Debug
+      - name: Publish Windows x64
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          $version = '0.1.0'
+          $requestedVersion = $env:RELEASE_VERSION
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $requestedVersion = $env:GITHUB_REF_NAME }
+          if ($requestedVersion) {
+            if ($requestedVersion -notmatch '^v(\d+\.\d+\.\d+)
+      - name: Run Windows integration checks
+        run: dotnet run --project tests/WindowsSmoke/WindowsSmoke.csproj -c Release -- artifacts/publish/DK.Easy.WindowsMaintenance.dll
+) { throw 'Expected vMAJOR.MINOR.PATCH tag.' }
+            $version = $Matches[1]
+          }
+          dotnet publish src/DK.Easy.WindowsMaintenance/DK.Easy.WindowsMaintenance.csproj -c Release -r win-x64 --self-contained false -p:Version=$version -o artifacts/publish
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Run Windows integration checks
+        run: dotnet run --project tests/WindowsSmoke/WindowsSmoke.csproj -c Release -- artifacts/publish/DK.Easy.WindowsMaintenance.dll
+      - name: Verify release package
+        shell: pwsh
+        run: |
+          $base = 'DK.Easy.WindowsMaintenance'
+          $publish = 'artifacts/publish'
+          $files = @("$base.exe", "$base.dll", "$base.deps.json", "$base.runtimeconfig.json")
+          $runtime = Get-Content "$publish/$base.runtimeconfig.json" -Raw | ConvertFrom-Json
+          if ('Microsoft.WindowsDesktop.App' -notin $runtime.runtimeOptions.frameworks.name -or
+              $runtime.runtimeOptions.includedFrameworks -or (Test-Path "$publish/coreclr.dll")) {
+            throw 'Expected a framework-dependent Windows Desktop package.'
+          }
+          if ((Get-Item "$publish/$base.exe").VersionInfo.ProductVersion.Split('+')[0] -ne $env:PACKAGE_VERSION) {
+            throw 'Executable version differs from the release version.'
+          }
+          $zipName = "DK-Easy-Windows-System-Maintenance-Tool-v$env:PACKAGE_VERSION-win-x64.zip"
+          $zip = "artifacts/$zipName"
+          $paths = $files | ForEach-Object { Join-Path $publish $_ }
+          Compress-Archive -LiteralPath $paths -DestinationPath $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath artifacts/package-check
+          foreach ($file in $files) {
+            if ((Get-FileHash "$publish/$file").Hash -ne (Get-FileHash "artifacts/package-check/$file").Hash) {
+              throw "Archived file differs: $file"
+            }
+          }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/SHA256SUMS.txt'), "$hash  $zipName`n")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release_version != '')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: dist
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS.txt
+          tag="${RELEASE_VERSION:-$GITHUB_REF_NAME}"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            target=(--verify-tag)
+          else
+            target=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$tag" ./*.zip SHA256SUMS.txt "${target[@]}" --prerelease --title "$tag · Windows x64" --notes "Windows 11 x64. Requires .NET 10 Desktop Runtime (x64). Extract the ZIP and run DK.Easy.WindowsMaintenance.exe. See docs/MANUAL_TESTS.md for desktop checks."
+          gh release view "$tag" --json url,isPrerelease,assets
