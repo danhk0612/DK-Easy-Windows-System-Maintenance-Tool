@@ -57,9 +57,9 @@
                     <ListBoxItem Tag="services" Content="서비스" />
                     <ListBoxItem Tag="tasks" Content="예약 작업" />
                     <ListBoxItem Tag="apps" Content="설치 프로그램" />
+                    <ListBoxItem Tag="antivirus" Content="바이러스 검사" />
                     <ListBoxItem Tag="history" Content="점검 기록" />
                     <ListBoxItem Tag="settings" Content="설정" />
-                    <ListBoxItem Tag="antivirus" Content="바이러스 검사" />
                 </ListBox>
             </DockPanel>
         </Border>
@@ -183,15 +183,21 @@
                     <TextBlock x:Name="AntivirusState" TextWrapping="Wrap" Margin="0,0,0,8" />
                     <WrapPanel>
                         <Button x:Name="InstallEngineButton" Content="엔진 다운로드 / 업데이트" Click="InstallEngine_Click" Margin="0,0,8,6" />
-                        <Button x:Name="SelectDriveButton" Content="드라이브 선택" Click="SelectDrive_Click" Margin="0,0,8,6" />
-                        <Button x:Name="SelectFolderButton" Content="폴더 선택" Click="SelectFolder_Click" Margin="0,0,8,6" />
-                        <Button x:Name="SelectFileButton" Content="파일 선택" Click="SelectFile_Click" Margin="0,0,8,6" />
                         <Button x:Name="AntivirusScanButton" Content="현재 항목 검사" Click="AntivirusScan_Click" Margin="0,0,8,6" />
                     </WrapPanel>
                     <TextBlock x:Name="AntivirusTarget" Text="검사 대상 미선택" TextWrapping="Wrap" />
                 </StackPanel>
-                <TextBox x:Name="AntivirusOutput" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" Padding="8" AutomationProperties.Name="악성코드 검사 결과" />
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                    </Grid.ColumnDefinitions>
+                    <TreeView x:Name="AntivirusTree" Margin="0,0,8,0" SelectedItemChanged="AntivirusTree_SelectionChanged"
+                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                              AutomationProperties.Name="검사할 드라이브, 폴더 또는 파일" />
+                    <TextBox x:Name="AntivirusOutput" Grid.Column="1" IsReadOnly="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Padding="8" AutomationProperties.Name="악성코드 검사 결과" />
+                </Grid>
             </Grid>
             <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">

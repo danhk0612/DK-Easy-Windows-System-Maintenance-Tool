@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using Microsoft.Win32;
 
 namespace DK.Easy.WindowsMaintenance;
 
@@ -48,9 +47,7 @@ public partial class MainWindow
 
         var available = !InspectionBusy;
         InstallEngineButton.IsEnabled = available;
-        SelectDriveButton.IsEnabled = available;
-        SelectFolderButton.IsEnabled = available;
-        SelectFileButton.IsEnabled = available;
+        AntivirusTree.IsEnabled = available;
         AntivirusScanButton.IsEnabled = available && installed is not null && antivirusTargetPath is not null;
     }
 
@@ -58,43 +55,62 @@ public partial class MainWindow
     {
         if (InspectionBusy)
             return;
+        if (AntivirusTree.SelectedItem is TreeViewItem selected && !Equals(selected.Tag, path))
+            selected.IsSelected = false;
         antivirusTargetPath = path;
         AntivirusTarget.Text = path;
         NavigationList.SelectedItem = NavigationList.Items.OfType<ListBoxItem>().Single(item => Equals(item.Tag, "antivirus"));
         RefreshAntivirus();
     }
 
-    private void SelectDrive_Click(object sender, RoutedEventArgs e)
+    private void InitializeAntivirusTree()
     {
-        var drives = new ComboBox { ItemsSource = DriveSelect.ItemsSource, SelectedItem = DriveSelect.SelectedItem };
-        var choose = new Button { Content = "선택", IsDefault = true, Margin = new Thickness(0, 8, 0, 0) };
-        var cancel = new Button { Content = "취소", IsCancel = true, Margin = new Thickness(0, 6, 0, 0) };
-        var panel = new StackPanel { Margin = new Thickness(16), Children = { drives, choose, cancel } };
-        var dialog = new Window
+        foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType is DriveType.Fixed or DriveType.Removable))
+            AntivirusTree.Items.Add(AntivirusNode(drive.Name, drive.Name, true));
+    }
+
+    private TreeViewItem AntivirusNode(string name, string path, bool folder)
+    {
+        var node = new TreeViewItem { Header = name, Tag = path };
+        if (folder)
         {
-            Title = "검사할 드라이브", Owner = this, ShowInTaskbar = false, Width = 290,
-            SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ResizeMode = ResizeMode.NoResize, Content = panel
-        };
-        choose.IsEnabled = drives.SelectedItem is not null;
-        drives.SelectionChanged += (_, _) => choose.IsEnabled = drives.SelectedItem is not null;
-        choose.Click += (_, _) => dialog.DialogResult = true;
-        if (dialog.ShowDialog() == true && drives.SelectedItem is string root)
-            SelectAntivirusTarget(root);
+            node.Items.Add(new TreeViewItem { Header = "폴더 열기", IsEnabled = false });
+            node.Expanded += AntivirusNode_Expanded;
+        }
+        return node;
     }
 
-    private void SelectFolder_Click(object sender, RoutedEventArgs e)
+    private async void AntivirusNode_Expanded(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "검사할 폴더" };
-        if (dialog.ShowDialog(this) == true)
-            SelectAntivirusTarget(dialog.FolderName);
+        if (sender is not TreeViewItem node || e.OriginalSource != node)
+            return;
+        node.Expanded -= AntivirusNode_Expanded;
+        var path = (string)node.Tag;
+        node.Items.Clear();
+        node.Items.Add(new TreeViewItem { Header = "불러오는 중…", IsEnabled = false });
+        try
+        {
+            var entries = await Task.Run(() => new DirectoryInfo(path).EnumerateFileSystemInfos()
+                .Where(entry => !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                .OrderBy(entry => entry is not DirectoryInfo)
+                .ThenBy(entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(entry => (entry.Name, entry.FullName, Folder: entry is DirectoryInfo)).ToArray());
+            node.Items.Clear();
+            foreach (var entry in entries)
+                node.Items.Add(AntivirusNode(entry.Name, entry.FullName, entry.Folder));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            node.Items.Clear();
+            node.Items.Add(new TreeViewItem { Header = "폴더를 열 수 없습니다.", IsEnabled = false, ToolTip = error.Message });
+            node.Expanded += AntivirusNode_Expanded;
+        }
     }
 
-    private void SelectFile_Click(object sender, RoutedEventArgs e)
+    private void AntivirusTree_SelectionChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        var dialog = new OpenFileDialog { Title = "검사할 파일", Filter = "모든 파일 (*.*)|*.*" };
-        if (dialog.ShowDialog(this) == true)
-            SelectAntivirusTarget(dialog.FileName);
+        if (e.NewValue is TreeViewItem { Tag: string path })
+            SelectAntivirusTarget(path);
     }
 
     private async void InstallEngine_Click(object sender, RoutedEventArgs e) =>
@@ -134,12 +150,24 @@ public partial class MainWindow
             }
             else
             {
-                var result = await Task.Run(() => AntivirusEngine.ScanAsync(target, cancellation.Token));
+                ScanProgress.Maximum = 100;
+                ScanProgress.Value = 0;
+                StatusText.Text = "바이러스 검사 · 대상 파일 집계 중…";
+                var progress = new Progress<(long Done, long Total)>(value =>
+                {
+                    if (antivirusCancellation != cancellation || cancellation.IsCancellationRequested)
+                        return;
+                    ScanProgress.IsIndeterminate = value.Total == 0;
+                    ScanProgress.Value = value.Total == 0 ? 0 : Math.Min(99, 100.0 * value.Done / value.Total);
+                    StatusText.Text = value.Total == 0 ? "바이러스 검사 · 엔진 준비 중…" :
+                        $"바이러스 검사 · {ScanProgress.Value:0.#}% · {value.Done:N0}/{value.Total:N0}개 파일";
+                });
+                var result = await Task.Run(() => AntivirusEngine.ScanAsync(target, progress, cancellation.Token));
                 AntivirusOutput.Text = target + Environment.NewLine + Environment.NewLine + result.Output;
                 StatusText.Text = result.ExitCode switch
                 {
-                    0 => "검사한 파일에서 악성코드 탐지 없음 · 검사 범위와 오류는 결과에서 확인",
-                    1 => "악성코드 탐지 · 결과에서 파일과 탐지명을 확인하세요.",
+                    0 => "바이러스 검사 완료 · 100% · 탐지 없음 · 검사 범위와 오류는 결과에서 확인",
+                    1 => "바이러스 검사 완료 · 100% · 악성코드 탐지 · 결과에서 파일과 탐지명을 확인하세요.",
                     _ => $"악성코드 검사 실패 · 종료 코드 {result.ExitCode}"
                 };
             }

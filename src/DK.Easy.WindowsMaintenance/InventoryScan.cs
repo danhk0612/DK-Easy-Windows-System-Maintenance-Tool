@@ -13,16 +13,17 @@ namespace DK.Easy.WindowsMaintenance;
 
 internal sealed record InventoryEntry(string Id, string Name, string Location, string State,
     string? Publisher, string? Detail, bool SystemItem = false, string? Target = null,
-    string? Version = null, string? InstallDate = null, long? EstimatedKiB = null, string? TaskDefinitionHash = null);
+    string? Version = null, string? InstallDate = null, long? EstimatedKiB = null, string? TaskDefinitionHash = null,
+    DateTime? StartupFileModifiedUtc = null);
 
 internal static class InventoryScan
 {
     internal static IReadOnlyList<InventoryEntry> Startup(CancellationToken token)
     {
         var results = new List<InventoryEntry>();
-        foreach (var folder in new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.CommonStartup })
+        foreach (var directory in new[] { MaintenanceActions.UserStartup,
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), MaintenanceActions.DisabledStartup })
         {
-            var directory = Environment.GetFolderPath(folder);
             if (!Directory.Exists(directory))
                 continue;
             foreach (var path in Directory.EnumerateFiles(directory))
@@ -30,7 +31,18 @@ internal static class InventoryScan
                 token.ThrowIfCancellationRequested();
                 if (Path.GetFileName(path).Equals("desktop.ini", StringComparison.OrdinalIgnoreCase))
                     continue;
-                results.Add(new InventoryEntry(path, Path.GetFileName(path), directory, "등록됨", null, path, Target: path));
+                var info = new FileInfo(path);
+                var disabledFolder = directory == MaintenanceActions.DisabledStartup;
+                var id = disabledFolder ? Path.Combine(MaintenanceActions.UserStartup, info.Name) : path;
+                DateTime? modified = null;
+                try
+                {
+                    if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.System)) == 0)
+                        modified = info.LastWriteTimeUtc;
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                results.Add(new InventoryEntry(id, info.Name, directory, disabledFolder ? "비활성" : "등록됨",
+                    null, path, Target: path, StartupFileModifiedUtc: modified));
             }
         }
 
@@ -39,6 +51,8 @@ internal static class InventoryScan
         foreach (var keyName in new[] { "Run", "RunOnce" })
         {
             token.ThrowIfCancellationRequested();
+            if (hive == RegistryHive.CurrentUser && view == RegistryView.Registry32)
+                continue;
             const string parent = @"Software\Microsoft\Windows\CurrentVersion\";
             using var baseKey = RegistryKey.OpenBaseKey(hive, view);
             using var key = baseKey.OpenSubKey(parent + keyName);
@@ -56,16 +70,19 @@ internal static class InventoryScan
                     Publisher(target), command, Target: target));
             }
         }
-        using (var hive = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64))
-        using (var disabled = hive.OpenSubKey(MaintenanceActions.DisabledRunKey))
+        foreach (var scope in new[] { (RegistryHive.CurrentUser, RegistryView.Registry64),
+            (RegistryHive.LocalMachine, RegistryView.Registry64), (RegistryHive.LocalMachine, RegistryView.Registry32) })
         {
+            using var hive = RegistryKey.OpenBaseKey(scope.Item1, scope.Item2);
+            using var disabled = hive.OpenSubKey(MaintenanceActions.DisabledRunKey);
+            var location = $"{scope.Item1} · {scope.Item2}";
             foreach (var name in disabled?.GetValueNames() ?? [])
             {
                 token.ThrowIfCancellationRequested();
                 var command = disabled!.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
                 var target = ExecutablePath(command);
-                results.Add(new InventoryEntry($"CurrentUser · Registry64 · Run:{name}", name,
-                    "CurrentUser · Registry64 · 비활성", "비활성", Publisher(target), command, Target: target));
+                results.Add(new InventoryEntry($"{location} · Run:{name}", name,
+                    $"{location} · 비활성", "비활성", Publisher(target), command, Target: target));
             }
         }
         return results.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();

@@ -28,6 +28,12 @@ try
     Require(Rows(Property(storage, "Large")).Any(row => (string)Property(row, "Path") == path), "File inventory");
     Reject<OperationCanceledException>(() => Invoke("StorageScan", "Run", root.FullName, 0, 1, new CancellationToken(true)));
 
+    var updates = new List<(int Done, int Total, string Path)>();
+    Invoke("StorageScan", "RunWithProgress", root.FullName, 0, 1, token,
+        new InlineProgress<(int Done, int Total, string Path)>(updates.Add));
+    Require(updates.Count >= 2 && updates.First().Done == 0 && updates.Last().Done == updates.Last().Total
+        && updates.Last().Total > 0, "Storage progress reaches its final count");
+
     var selected = Rows(Property(storage, "Large")).Single(row => (string)Property(row, "Path") == path);
     Require((bool)Invoke("MaintenanceActions", "CanRecycle", selected), "Fixture qualifies for recycle");
     using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -72,7 +78,14 @@ try
         Require((string?)run.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) == command
             && run.GetValueKind(name) == RegistryValueKind.ExpandString && backup.GetValue(name) is null,
             "Startup command and registry type restored");
-        Console.WriteLine("Startup disable and restore passed.");
+        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name, "CurrentUser · Registry64 · Run"), "delete");
+        Require(run.GetValue(name) is null && backup.GetValue(name) is null, "Active startup registration removed");
+
+        run.SetValue(name, command, RegistryValueKind.ExpandString);
+        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name, "CurrentUser · Registry64 · Run"), "disable");
+        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name, "CurrentUser · Registry64 · 비활성"), "delete");
+        Require(run.GetValue(name) is null && backup.GetValue(name) is null, "Disabled startup registration removed");
+        Console.WriteLine("Startup disable, restore and deletion passed.");
     }
     finally
     {
@@ -138,4 +151,9 @@ static void Reject<T>(Action action) where T : Exception
         return;
     }
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
+sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }
