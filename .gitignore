@@ -1,0 +1,18 @@
+# .NET / Visual Studio
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+
+# Local/generated artifacts
+publish/
+artifacts/
+TestResults/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
