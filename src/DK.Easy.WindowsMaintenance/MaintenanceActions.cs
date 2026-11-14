@@ -15,16 +15,23 @@ internal static class MaintenanceActions
     internal const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     internal const string DisabledRunKey = @"Software\DKEasyWindowsMaintenance\DisabledRun";
 
-    internal static bool CanRecycle(StorageEntry file)
+    internal static bool CanRecycle(StorageEntry file) => RecycleRestriction(file) is null;
+
+    internal static string? RecycleRestriction(StorageEntry file)
     {
+        if (file.Kind == "폴더")
+            return "폴더 전체 이동은 지원하지 않습니다. 위치를 열어 개별 파일을 확인하세요.";
+
         var root = file.Kind == "임시파일" ? StorageScan.UserTemp :
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var profileData = Path.Combine(root, "AppData");
-        return file.Kind != "폴더" && InventoryScan.IsWithin(file.Path, root)
-            && (file.Kind == "임시파일" || (!InventoryScan.IsWithin(file.Path, profileData)
-                && !InventoryScan.IsWithin(file.Path, local) && !InventoryScan.IsWithin(file.Path, roaming)));
+        if (!InventoryScan.IsWithin(file.Path, root))
+            return "현재 사용자 프로필 또는 사용자 임시파일 범위의 파일만 이동할 수 있습니다.";
+        if (file.Kind != "임시파일" && (InventoryScan.IsWithin(file.Path, Path.Combine(root, "AppData"))
+            || InventoryScan.IsWithin(file.Path, local) || InventoryScan.IsWithin(file.Path, roaming)))
+            return "앱 데이터 경로는 보호됩니다.";
+        return null;
     }
 
     internal static void Recycle(StorageEntry selected)
@@ -59,6 +66,19 @@ internal static class MaintenanceActions
             && !string.IsNullOrWhiteSpace(item.Publisher) && !item.Publisher.Contains("Microsoft", StringComparison.OrdinalIgnoreCase),
         _ => false
     };
+
+    internal static string? ManagementRestriction(string page, InventoryEntry item)
+    {
+        if (page is not ("startup" or "services" or "tasks") || Available(page, item))
+            return null;
+        return page switch
+        {
+            "startup" when item.Location.EndsWith("RunOnce", StringComparison.Ordinal) => "RunOnce 항목은 조회 전용입니다.",
+            "startup" => "앱에서 원본을 보존하며 변경할 수 있는 항목은 현재 사용자 64비트 Run입니다.",
+            "services" => "Windows 서비스이거나 실행 파일과 타사 게시자를 확인할 수 없어 앱에서 변경할 수 없습니다.",
+            _ => "Windows 작업이거나 작성자 또는 작업 정의를 확인할 수 없어 앱에서 변경할 수 없습니다."
+        };
+    }
 
     internal static ManagementCommand[] Commands(string page, InventoryEntry item) => page switch
     {

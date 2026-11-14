@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Xml.Linq;
 using Microsoft.Win32;
 
 namespace DK.Easy.WindowsMaintenance;
@@ -67,9 +68,13 @@ internal static class MaintenanceScan
                 message = null;
             }
 
+            string? xml = null;
+            try { xml = record.ToXml(); }
+            catch (EventLogException) { }
+
             var severity = record.Level switch { 1 => "심각", 2 => "오류", 3 => "경고", _ => "보고" };
             entries.Add(new SystemEvent(record.TimeCreated, channel, severity, record.ProviderName, record.Id,
-                record.RecordId, message));
+                record.RecordId, message, record.MachineName, record.ProcessId, record.ThreadId, xml));
         }
         return entries;
     }
@@ -77,8 +82,20 @@ internal static class MaintenanceScan
 
 internal sealed record SystemOverview(string Computer, string Windows, string Drive, long Total, long Free);
 internal sealed record SystemEvent(DateTime? OccurredAt, string Channel, string Severity, string? Provider, int EventId,
-    long? RecordId, string? Message)
+    long? RecordId, string? Message, string? Computer, int? ProcessId, int? ThreadId, string? Xml)
 {
+    internal string Payload()
+    {
+        if (Xml is null)
+            return "";
+        var root = XElement.Parse(Xml);
+        var ns = root.Name.Namespace;
+        var data = root.Element(ns + "EventData");
+        var fields = data?.Elements(ns + "Data").Select((field, index) =>
+            $"{(string?)field.Attribute("Name") ?? $"데이터 {index + 1}"}: {field.Value}");
+        return string.Join(Environment.NewLine, fields ?? Enumerable.Empty<string>());
+    }
+
     public string DisplayTime => OccurredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "시각 없음";
 }
 

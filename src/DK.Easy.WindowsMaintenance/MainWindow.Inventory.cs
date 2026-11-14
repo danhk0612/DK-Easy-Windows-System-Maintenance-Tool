@@ -82,7 +82,7 @@ public partial class MainWindow
 
     private void RefreshInventory()
     {
-        if (InventoryGrid is null || activePage is "dashboard" or "events" or "settings")
+        if (InventoryGrid is null || activePage is "dashboard" or "events" or "settings" or "antivirus")
             return;
 
         refreshingInventory = true;
@@ -93,13 +93,13 @@ public partial class MainWindow
             InventoryGrid.Columns.Clear();
             InventoryDetails.IsExpanded = false;
             DriveSelect.Visibility = page == "storage" ? Visibility.Visible : Visibility.Collapsed;
-            InspectPageButton.Visibility = page == "history" ? Visibility.Collapsed : Visibility.Visible;
+            InspectPageButton.Visibility = Visibility.Visible;
             FilterSwitch.Visibility = page is "storage" or "services" or "tasks" ? Visibility.Visible : Visibility.Collapsed;
             FilterSwitch.Content = page == "storage" ? "임시파일 보기" : "Windows 항목 포함";
             FilterSwitch.IsChecked = filters.Contains(page);
             OpenLocationButton.Visibility = page is "storage" or "startup" or "apps" ? Visibility.Visible : Visibility.Collapsed;
             ManageButton.Visibility = page == "history" ? Visibility.Collapsed : Visibility.Visible;
-            ManageButton.Content = page == "apps" ? "Windows 설치 앱 열기" :
+            ManageButton.Content = page == "apps" ? "선택 항목 관리" :
                 page == "storage" ? "휴지통으로 이동" : "선택 항목 관리";
             InventorySummary.Text = inventoryErrors.TryGetValue(page, out var error)
                 ? $"조회 실패 · {error}" : "미검사";
@@ -188,19 +188,19 @@ public partial class MainWindow
         var selection = InventoryGrid.SelectedItem;
         InventoryDetails.IsEnabled = selection is not null;
         OpenLocationButton.IsEnabled = selection is StorageEntry || selection is InventoryEntry { Target: not null };
-        ManageButton.IsEnabled = !managing && scanCancellation is null && (activePage == "apps"
-            || selection is StorageEntry storage && MaintenanceActions.CanRecycle(storage)
-            || selection is InventoryEntry row && MaintenanceActions.Available(activePage, row));
+        ManageButton.IsEnabled = !InspectionBusy && (activePage == "apps"
+            || selection is StorageEntry || selection is InventoryEntry);
         if (selection is null)
             InventoryDetails.IsExpanded = false;
         InventoryDetailText.Text = selection switch
         {
-            StorageEntry file => $"{file.Path}\n{file.Size} · {file.Modified:yyyy-MM-dd HH:mm:ss}",
+            StorageEntry file => $"{file.Path}\n{file.Size} · {file.Modified:yyyy-MM-dd HH:mm:ss}"
+                + (MaintenanceActions.CanRecycle(file) ? "" : "\n휴지통 이동 제한: " + MaintenanceActions.RecycleRestriction(file)),
             InventoryEntry item => $"{item.Name}\n{item.Location}\n{item.State}\n"
                 + $"게시자 / 원본: {item.Publisher ?? "확인 불가"}\n"
                 + (activePage == "apps" ? $"설치일: {item.InstallDate ?? "확인 불가"} · 크기: "
-                    + (item.EstimatedKiB is long size ? $"{size:N0} KiB\n" : "확인 불가\n") : "")
-                + (item.Detail ?? ""),
+                    + (item.EstimatedKiB is long size ? $"{FormatSize(size * 1024)}\n" : "확인 불가\n") : "")
+                + (item.Detail ?? "") + (MaintenanceActions.ManagementRestriction(activePage, item) is { } reason ? $"\n\n관리 제한: {reason}" : ""),
             InventorySnapshot item => DescribeHistory(item),
             _ => ""
         };
@@ -261,7 +261,7 @@ public partial class MainWindow
 
     private async void Manage_Click(object sender, RoutedEventArgs e)
     {
-        if (managing || scanCancellation is not null)
+        if (InspectionBusy)
             return;
 
         var page = activePage;
@@ -270,12 +270,22 @@ public partial class MainWindow
         {
             if (page == "apps")
             {
-                using var settingsProcess = Process.Start(new ProcessStartInfo("ms-settings:appsfeatures") { UseShellExecute = true });
+                if (selected is InventoryEntry app && MessageBox.Show(this,
+                    $"{app.Name}\n\nWindows의 설치된 앱 화면을 열까요? 앱 이름으로 검색할 수 있습니다.",
+                    "설치 프로그램 관리", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    return;
+                OpenWindowsManager(page);
                 return;
             }
 
-            if (selected is StorageEntry file && MaintenanceActions.CanRecycle(file))
+            if (selected is StorageEntry file)
             {
+                if (MaintenanceActions.RecycleRestriction(file) is { } restriction)
+                {
+                    InventoryDetails.IsExpanded = true;
+                    MessageBox.Show(this, restriction, "휴지통 이동 제한", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
                 if (MessageBox.Show(this, $"{file.Path}\n{file.Size}\n\n선택한 파일을 휴지통으로 이동할까요?",
                         "파일 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
                     return;
@@ -294,8 +304,16 @@ public partial class MainWindow
                 return;
             }
 
-            if (selected is not InventoryEntry row || !MaintenanceActions.Available(page, row))
+            if (selected is not InventoryEntry row)
                 return;
+            if (MaintenanceActions.ManagementRestriction(page, row) is { } reason)
+            {
+                InventoryDetails.IsExpanded = true;
+                if (MessageBox.Show(this, $"{reason}\n\nWindows 기본 관리 화면을 열까요?",
+                    "관리 제한", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                    OpenWindowsManager(page);
+                return;
+            }
 
             var command = ChooseManagementAction(page, row);
             if (command is null)
@@ -304,8 +322,7 @@ public partial class MainWindow
                     "변경 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
                 return;
             managing = true;
-            ScanButton.IsEnabled = false;
-            UpdateInventorySelection();
+            RefreshInspectionButtons();
             StatusText.Text = $"{command.Value.Label} 요청 처리 중…";
             await MaintenanceActions.Apply(page, row, command.Value.Action);
             await RunScanAsync(page, afterManagement: true);
@@ -320,9 +337,7 @@ public partial class MainWindow
         finally
         {
             managing = false;
-            if (scanCancellation is null)
-                ScanButton.IsEnabled = true;
-            UpdateInventorySelection();
+            RefreshInspectionButtons();
         }
     }
 

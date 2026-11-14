@@ -61,8 +61,8 @@ public partial class MainWindow : Window
         menu.Items.Add("창 열기", null, (_, _) => RestoreWindow());
         trayScan = new Forms.ToolStripMenuItem("전체 검사", null, async (_, _) => await RunScanAsync());
         menu.Items.Add(trayScan);
-        menu.Items.Add("시스템 문제", null, (_, _) => OpenPage(1));
-        menu.Items.Add("설정", null, (_, _) => OpenPage(8));
+        menu.Items.Add("시스템 문제", null, (_, _) => OpenPage("events"));
+        menu.Items.Add("설정", null, (_, _) => OpenPage("settings"));
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) =>
         {
@@ -95,10 +95,13 @@ public partial class MainWindow : Window
         PageTitle.Text = (string)selected.Content;
         var page = (string)selected.Tag;
         DashboardPage.Visibility = page == "dashboard" ? Visibility.Visible : Visibility.Collapsed;
+        OverviewScanButton.Visibility = DashboardPage.Visibility;
         EventsPage.Visibility = page == "events" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
         activePage = page;
-        InventoryPage.Visibility = page is "dashboard" or "events" or "settings" ? Visibility.Collapsed : Visibility.Visible;
+        AntivirusPage.Visibility = page == "antivirus" ? Visibility.Visible : Visibility.Collapsed;
+        if (page == "antivirus") RefreshAntivirus();
+        InventoryPage.Visibility = page is "dashboard" or "events" or "settings" or "antivirus" ? Visibility.Collapsed : Visibility.Visible;
         RefreshInventory();
     }
 
@@ -107,13 +110,14 @@ public partial class MainWindow : Window
     private void CancelScan_Click(object sender, RoutedEventArgs e)
     {
         scanCancellation?.Cancel();
+        antivirusCancellation?.Cancel();
         CancelScanButton.IsEnabled = false;
         StatusText.Text = "검사 취소 중…";
     }
 
     private async Task RunScanAsync(string? only = null, bool afterManagement = false)
     {
-        if (scanCancellation is not null || (managing && !afterManagement))
+        if (scanCancellation is not null || antivirusCancellation is not null || (managing && !afterManagement))
             return;
 
         using var cancellation = new CancellationTokenSource();
@@ -124,12 +128,8 @@ public partial class MainWindow : Window
         var stages = only is null ? new[] { "dashboard", "events", "storage", "startup", "services", "tasks", "apps" } : new[] { only };
         var scanDrive = (string?)DriveSelect.SelectedItem;
         ScanProgress.Maximum = stages.Length;
-        InspectPageButton.IsEnabled = false;
+        RefreshInspectionButtons();
         DriveSelect.IsEnabled = false;
-        ManageButton.IsEnabled = false;
-        ScanButton.IsEnabled = false;
-        if (trayScan is not null)
-            trayScan.Enabled = false;
         ExportButton.IsEnabled = false;
         CancelScanButton.IsEnabled = true;
         CancelScanButton.Visibility = Visibility.Visible;
@@ -172,6 +172,10 @@ public partial class MainWindow : Window
                                 () => StorageScan.Run(scanDrive, scanSettings.FileThreshold, scanSettings.FolderThreshold, token), token);
                             token.ThrowIfCancellationRequested();
                             storageResults[scanDrive] = storage;
+                            inventoryErrors.Remove(stage);
+                            break;
+                        case "history":
+                            history = await Task.Run(InspectionHistory.Read, token);
                             inventoryErrors.Remove(stage);
                             break;
                         default:
@@ -246,12 +250,8 @@ public partial class MainWindow : Window
         finally
         {
             scanCancellation = null;
-            if (trayScan is not null)
-                trayScan.Enabled = true;
-            ScanButton.IsEnabled = true;
-            InspectPageButton.IsEnabled = true;
+            RefreshInspectionButtons();
             DriveSelect.IsEnabled = true;
-            UpdateInventorySelection();
             ExportButton.IsEnabled = events is not null;
             CancelScanButton.Visibility = Visibility.Collapsed;
             ScanProgress.Visibility = Visibility.Collapsed;
@@ -269,7 +269,7 @@ public partial class MainWindow : Window
         DriveUsage.Visibility = Visibility.Visible;
     }
 
-    private static string FormatSize(long bytes) => $"{bytes / (1024.0 * 1024 * 1024):N1} GiB";
+    private static string FormatSize(long bytes) => StorageEntry.FormatSize(bytes);
 
     private void Event_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -279,7 +279,7 @@ public partial class MainWindow : Window
             EventDetails.IsExpanded = false;
         EventMessage.Text = entry is null ? "" :
             $"{entry.Channel} · 레코드 ID {entry.RecordId?.ToString() ?? "없음"}{Environment.NewLine}{Environment.NewLine}"
-            + (entry.Message ?? "이 이벤트의 설명을 Windows에서 읽을 수 없습니다.");
+            + DescribeEvent(entry);
     }
 
     private void Export_Click(object sender, RoutedEventArgs e)
@@ -326,7 +326,8 @@ public partial class MainWindow : Window
         {
             report.AppendLine();
             report.AppendLine($"[{entry.DisplayTime}] {entry.Severity} / {entry.Channel} / {entry.Provider} / 이벤트 ID {entry.EventId} / 레코드 ID {entry.RecordId}");
-            report.AppendLine(entry.Message ?? "이벤트 설명을 읽을 수 없습니다.");
+            report.AppendLine(DescribeEvent(entry));
+            if (entry.Xml is not null) report.AppendLine(entry.Xml);
         }
         return report.ToString();
     }
@@ -356,10 +357,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenPage(int page)
+    private void OpenPage(string page)
     {
         RestoreWindow();
-        NavigationList.SelectedIndex = page;
+        NavigationList.SelectedItem = NavigationList.Items.OfType<ListBoxItem>().Single(item => Equals(item.Tag, page));
     }
 
     private void RestoreWindow()
@@ -402,6 +403,7 @@ public partial class MainWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         scanCancellation?.Cancel();
+        antivirusCancellation?.Cancel();
         if (tray is not null)
         {
             tray.Visible = false;

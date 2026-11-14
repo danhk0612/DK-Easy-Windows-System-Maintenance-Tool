@@ -59,6 +59,7 @@
                     <ListBoxItem Tag="apps" Content="설치 프로그램" />
                     <ListBoxItem Tag="history" Content="점검 기록" />
                     <ListBoxItem Tag="settings" Content="설정" />
+                    <ListBoxItem Tag="antivirus" Content="바이러스 검사" />
                 </ListBox>
             </DockPanel>
         </Border>
@@ -71,6 +72,8 @@
             <DockPanel Margin="0,0,0,12" LastChildFill="True">
                 <Button x:Name="ScanButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
                         Content="전체 검사" Click="Scan_Click" VerticalAlignment="Center" />
+                <Button x:Name="OverviewScanButton" DockPanel.Dock="Right" Content="현재 항목 검사"
+                        Click="InspectPage_Click" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <TextBlock x:Name="PageTitle" Text="대시보드" FontSize="27" FontWeight="SemiBold"
                            VerticalAlignment="Center" />
             </DockPanel>
@@ -114,17 +117,19 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <DockPanel Margin="0,0,0,9">
+                    <Button x:Name="EventScanButton" DockPanel.Dock="Right" Content="현재 항목 검사" Click="InspectPage_Click" Margin="8,0,0,0" />
                     <Button x:Name="ExportButton" DockPanel.Dock="Right" Content="내보내기" Click="Export_Click"
                             IsEnabled="False" VerticalAlignment="Top" Margin="8,0,0,0" />
                     <TextBlock x:Name="EventSummary" Text="미검사 · Windows 시스템·응용 프로그램 로그의 심각 및 오류 이벤트"
                                Foreground="{StaticResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
-                <DataGrid x:Name="EventsGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
+                <DataGrid x:Name="EventsGrid" MouseDoubleClick="Row_DoubleClick" ContextMenuOpening="Row_ContextMenuOpening" PreviewMouseRightButtonDown="Row_RightClick" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
                           SelectionMode="Single" SelectionUnit="FullRow" SelectionChanged="Event_Changed"
                           RowHeight="33" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#E6EDF3" Background="White" BorderBrush="#DCE5ED"
                           ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
                           AutomationProperties.Name="시스템 이벤트 목록">
+                    <DataGrid.ContextMenu><ContextMenu><MenuItem Header="상세 정보" /></ContextMenu></DataGrid.ContextMenu>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="발생 시각" Binding="{Binding DisplayTime}" Width="158" />
                         <DataGridTextColumn Header="수준" Binding="{Binding Severity}" Width="62" />
@@ -148,7 +153,7 @@
                     <WrapPanel>
                         <ComboBox x:Name="DriveSelect" Width="104" Margin="0,0,8,0" VerticalContentAlignment="Center"
                                   AutomationProperties.Name="검사할 드라이브" SelectionChanged="Drive_Changed" />
-                        <Button x:Name="InspectPageButton" Content="이 화면 검사" Click="InspectPage_Click" Margin="0,0,8,0" />
+                        <Button x:Name="InspectPageButton" Content="현재 항목 검사" Click="InspectPage_Click" Margin="0,0,8,0" />
                         <Button x:Name="OpenLocationButton" Content="위치 열기" Click="OpenLocation_Click" Margin="0,0,8,0" />
                         <Button x:Name="ManageButton" Content="선택 항목 관리" Click="Manage_Click" Margin="0,0,8,0" />
                         <CheckBox x:Name="FilterSwitch" Style="{StaticResource Switch}" VerticalAlignment="Center"
@@ -156,16 +161,37 @@
                     </WrapPanel>
                     <TextBlock x:Name="InventorySummary" Margin="0,6,0,0" Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
                 </StackPanel>
-                <DataGrid x:Name="InventoryGrid" Grid.Row="1" IsReadOnly="True" AutoGenerateColumns="False"
+                <DataGrid x:Name="InventoryGrid" MouseDoubleClick="Row_DoubleClick" ContextMenuOpening="Row_ContextMenuOpening" PreviewMouseRightButtonDown="Row_RightClick" Grid.Row="1" IsReadOnly="True" AutoGenerateColumns="False"
                           SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
                           SelectionChanged="InventorySelection_Changed" GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#E6EDF3" Background="White" BorderBrush="#DCE5ED"
                           ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                          AutomationProperties.Name="점검 결과 목록" />
+                          AutomationProperties.Name="점검 결과 목록">
+                    <DataGrid.ContextMenu><ContextMenu><MenuItem Header="상세 정보" /></ContextMenu></DataGrid.ContextMenu>
+                </DataGrid>
                 <Expander x:Name="InventoryDetails" Grid.Row="2" Header="선택 항목 상세" Margin="0,8,0,0">
                     <TextBox x:Name="InventoryDetailText" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="130"
                              VerticalScrollBarVisibility="Auto" Padding="8" Margin="0,6,0,0" />
                 </Expander>
+            </Grid>
+            <Grid x:Name="AntivirusPage" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,10">
+                    <TextBlock x:Name="AntivirusState" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <WrapPanel>
+                        <Button x:Name="InstallEngineButton" Content="엔진 다운로드 / 업데이트" Click="InstallEngine_Click" Margin="0,0,8,6" />
+                        <Button x:Name="SelectDriveButton" Content="드라이브 선택" Click="SelectDrive_Click" Margin="0,0,8,6" />
+                        <Button x:Name="SelectFolderButton" Content="폴더 선택" Click="SelectFolder_Click" Margin="0,0,8,6" />
+                        <Button x:Name="SelectFileButton" Content="파일 선택" Click="SelectFile_Click" Margin="0,0,8,6" />
+                        <Button x:Name="AntivirusScanButton" Content="현재 항목 검사" Click="AntivirusScan_Click" Margin="0,0,8,6" />
+                    </WrapPanel>
+                    <TextBlock x:Name="AntivirusTarget" Text="검사 대상 미선택" TextWrapping="Wrap" />
+                </StackPanel>
+                <TextBox x:Name="AntivirusOutput" Grid.Row="1" IsReadOnly="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" Padding="8" AutomationProperties.Name="악성코드 검사 결과" />
             </Grid>
             <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
