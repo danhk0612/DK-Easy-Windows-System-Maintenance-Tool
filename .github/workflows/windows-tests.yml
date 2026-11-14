@@ -62,12 +62,15 @@ jobs:
           $zipName = "DK-Easy-Windows-System-Maintenance-Tool-v$env:PACKAGE_VERSION-win-x64.zip"
           $zip = "artifacts/$zipName"
           $paths = $files | ForEach-Object { Join-Path $publish $_ }
-          Compress-Archive -LiteralPath $paths -DestinationPath $zip
+          Compress-Archive -LiteralPath ($paths + 'LICENSE') -DestinationPath $zip
           Expand-Archive -LiteralPath $zip -DestinationPath artifacts/package-check
           foreach ($file in $files) {
             if ((Get-FileHash "$publish/$file").Hash -ne (Get-FileHash "artifacts/package-check/$file").Hash) {
               throw "Archived file differs: $file"
             }
+          }
+          if ((Get-FileHash LICENSE).Hash -ne (Get-FileHash artifacts/package-check/LICENSE).Hash) {
+            throw 'Archived MIT license differs.'
           }
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText((Join-Path $PWD 'artifacts/SHA256SUMS.txt'), "$hash  $zipName`n")
