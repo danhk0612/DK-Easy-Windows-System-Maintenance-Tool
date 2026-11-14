@@ -64,11 +64,11 @@ try
     try
     {
         run.SetValue(name, command, RegistryValueKind.ExpandString);
-        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name), "disable");
+        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name, "CurrentUser · Registry64 · Run"), "disable");
         Require(run.GetValue(name) is null, "Startup fixture disabled");
         using var backup = hive.OpenSubKey(backupPath, writable: true)!;
         Require(backup.GetValueKind(name) == RegistryValueKind.ExpandString, "Original registry type saved");
-        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name), "restore");
+        await (Task)Invoke("MaintenanceActions", "Apply", "startup", FindStartup(name, "CurrentUser · Registry64 · 비활성"), "restore");
         Require((string?)run.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) == command
             && run.GetValueKind(name) == RegistryValueKind.ExpandString && backup.GetValue(name) is null,
             "Startup command and registry type restored");
@@ -100,8 +100,8 @@ finally
     root.Delete();
 }
 
-object FindStartup(string name) => Rows(Invoke("InventoryScan", "Startup", token))
-    .Single(row => (string)Property(row, "Name") == name);
+object FindStartup(string name, string location) => Rows(Invoke("InventoryScan", "Startup", token))
+    .Single(row => (string)Property(row, "Name") == name && (string)Property(row, "Location") == location);
 
 object Invoke(string type, string name, params object[] arguments)
 {
