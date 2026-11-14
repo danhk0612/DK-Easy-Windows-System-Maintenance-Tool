@@ -37,7 +37,7 @@ public partial class MainWindow
         {
             installed = AntivirusEngine.CurrentVersion();
             AntivirusState.Text = installed is null
-                ? "ClamAV 엔진 미설치 · 처음 사용할 때 엔진과 악성코드 정의를 다운로드하세요."
+                ? $"ClamAV 엔진 미설치 · 다운로드 위치: {AntivirusEngine.Root}"
                 : $"ClamAV {installed["clamav-".Length..]} · 선택한 위치를 검사하고 결과를 표시합니다.";
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -130,7 +130,6 @@ public partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         antivirusCancellation = cancellation;
         RefreshInspectionButtons();
-        AntivirusOutput.Clear();
         CancelScanButton.IsEnabled = true;
         CancelScanButton.Visibility = Visibility.Visible;
         ScanProgress.IsIndeterminate = true;
@@ -145,31 +144,49 @@ public partial class MainWindow
                     if (antivirusCancellation == cancellation && !cancellation.IsCancellationRequested)
                         StatusText.Text = message;
                 });
-                AntivirusOutput.Text = await Task.Run(() => AntivirusEngine.UpdateAsync(progress, cancellation.Token));
+                await Task.Run(() => AntivirusEngine.UpdateAsync(progress, cancellation.Token));
+                if (lastAntivirusReport is { } report)
+                    ShowAntivirusReport(report);
                 StatusText.Text = "ClamAV 엔진 및 악성코드 정의 준비 완료";
             }
             else
             {
                 ScanProgress.Maximum = 100;
                 ScanProgress.Value = 0;
-                StatusText.Text = "바이러스 검사 · 대상 파일 집계 중…";
+                StatusText.Text = "바이러스 검사 · 엔진 준비 중…";
+                var previousCount = lastAntivirusReport is { } previous
+                    && string.Equals(previous.Target, target, StringComparison.OrdinalIgnoreCase) ? previous.Processed : 0;
                 var progress = new Progress<(long Done, long Total)>(value =>
                 {
                     if (antivirusCancellation != cancellation || cancellation.IsCancellationRequested)
                         return;
                     ScanProgress.IsIndeterminate = value.Total == 0;
                     ScanProgress.Value = value.Total == 0 ? 0 : Math.Min(99, 100.0 * value.Done / value.Total);
-                    StatusText.Text = value.Total == 0 ? "바이러스 검사 · 엔진 준비 중…" :
-                        $"바이러스 검사 · {ScanProgress.Value:0.#}% · {value.Done:N0}/{value.Total:N0}개 파일";
+                    StatusText.Text = value.Total == 0 ? $"바이러스 검사 · 처리 {value.Done:N0}개 파일" :
+                        $"바이러스 검사 · 약 {ScanProgress.Value:0.#}% · 처리 {value.Done:N0}개 파일";
                 });
-                var result = await Task.Run(() => AntivirusEngine.ScanAsync(target, progress, cancellation.Token));
-                AntivirusOutput.Text = target + Environment.NewLine + Environment.NewLine + result.Output;
+                var result = await Task.Run(() => AntivirusEngine.ScanAsync(target, previousCount, progress, cancellation.Token));
+                string? cacheError = null;
+                if (result.ExitCode is 0 or 1)
+                {
+                    var report = new AntivirusReport(target, result.Output, result.ExitCode, result.Processed);
+                    lastAntivirusReport = report;
+                    ShowAntivirusReport(report);
+                    cacheError = await SaveScanResultAsync("antivirus", report, DateTimeOffset.Now);
+                    RefreshScanTime();
+                }
+                else
+                {
+                    AntivirusOutput.AppendText("\n\n최근 검사 실패\n" + result.Output);
+                }
                 StatusText.Text = result.ExitCode switch
                 {
                     0 => "바이러스 검사 완료 · 100% · 탐지 없음 · 검사 범위와 오류는 결과에서 확인",
                     1 => "바이러스 검사 완료 · 100% · 악성코드 탐지 · 결과에서 파일과 탐지명을 확인하세요.",
                     _ => $"악성코드 검사 실패 · 종료 코드 {result.ExitCode}"
                 };
+                if (cacheError is not null)
+                    StatusText.Text += $" · 기록 저장 실패: {cacheError}";
             }
         }
         catch (OperationCanceledException)
@@ -180,7 +197,7 @@ public partial class MainWindow
             or Win32Exception or JsonException or InvalidDataException or InvalidOperationException or ArgumentException
             or System.Collections.Generic.KeyNotFoundException)
         {
-            AntivirusOutput.Text = error.Message;
+            AntivirusOutput.AppendText("\n\n" + error.Message);
             StatusText.Text = target is null ? "ClamAV 다운로드 / 업데이트 실패" : "악성코드 검사 실패";
         }
         finally

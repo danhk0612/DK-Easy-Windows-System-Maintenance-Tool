@@ -38,6 +38,10 @@ try
     Require((bool)Invoke("MaintenanceActions", "CanRecycle", selected), "Fixture qualifies for recycle");
     using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         Reject<IOException>(() => Invoke("MaintenanceActions", "Recycle", selected));
+    Require((bool)Invoke("FileLocks", "IsAvailable", path), "Unlocked fixture is available");
+    Require(Rows(Invoke("FileLocks", "Find", path)).Count() == 0, "Unlocked fixture has no Restart Manager holders");
+    using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        Require(!(bool)Invoke("FileLocks", "IsAvailable", path), "Exclusive file lock is detected");
     File.AppendAllText(path, "changed");
     Reject<IOException>(() => Invoke("MaintenanceActions", "Recycle", selected));
     Require(File.Exists(path), "Locked and changed fixtures stayed in place");

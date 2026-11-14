@@ -31,6 +31,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         InitializeInventory();
         InitializeAntivirusTree();
+        RestoreScanResults();
         NavigationList.SelectedIndex = 0;
         try
         {
@@ -90,9 +91,12 @@ public partial class MainWindow : Window
 
     private void Navigation_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (NavigationList.SelectedItem is not ListBoxItem selected || PageTitle is null)
+        if (sender is not ListBox list || list.SelectedItem is not ListBoxItem selected || PageTitle is null)
             return;
 
+        var other = list == NavigationList ? UtilityNavigationList : NavigationList;
+        if (other is not null)
+            other.SelectedIndex = -1;
         PageTitle.Text = (string)selected.Content;
         var page = (string)selected.Tag;
         DashboardPage.Visibility = page == "dashboard" ? Visibility.Visible : Visibility.Collapsed;
@@ -104,6 +108,7 @@ public partial class MainWindow : Window
         if (page == "antivirus") RefreshAntivirus();
         InventoryPage.Visibility = page is "dashboard" or "events" or "settings" or "antivirus" ? Visibility.Collapsed : Visibility.Visible;
         RefreshInventory();
+        RefreshScanTime();
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e) => await RunScanAsync();
@@ -126,6 +131,7 @@ public partial class MainWindow : Window
         var token = cancellation.Token;
         var scanSettings = settings;
         var failures = 0;
+        string? cacheError = null;
         var stages = only is null ? new[] { "dashboard", "events", "storage", "startup", "services", "tasks", "apps" } : new[] { only };
         var scanDrive = (string?)DriveSelect.SelectedItem;
         ScanProgress.Maximum = stages.Length;
@@ -155,17 +161,17 @@ public partial class MainWindow : Window
                             overview = await Task.Run(MaintenanceScan.ReadOverview, token);
                             token.ThrowIfCancellationRequested();
                             ShowOverview(overview);
+                            inventoryErrors.Remove(stage);
+                            cacheError = await SaveScanResultAsync(stage, overview, DateTimeOffset.Now) ?? cacheError;
                             break;
                         case "events":
                             var snapshot = await Task.Run(
                                 () => MaintenanceScan.ReadSystemEvents(scanSettings.EventDays, scanSettings.IncludeWarnings, token), token);
                             token.ThrowIfCancellationRequested();
-                            events = snapshot;
+                            ShowEvents(snapshot);
+                            inventoryErrors.Remove(stage);
                             eventCount = snapshot.Entries.Count;
-                            EventsGrid.ItemsSource = snapshot.Entries;
-                            EventSummary.Text = $"최근 {scanSettings.EventDays}일 · {snapshot.Entries.Count:N0}건"
-                                + (snapshot.IncludesWarnings ? " · 경고 포함" : " · 심각·오류 및 문제 보고")
-                                + (snapshot.IsTruncated ? " · 최신 200건만 표시" : "");
+                            cacheError = await SaveScanResultAsync(stage, snapshot, DateTimeOffset.Now) ?? cacheError;
                             break;
                         case "storage":
                             if (scanDrive is null)
@@ -187,6 +193,7 @@ public partial class MainWindow : Window
                                 scanDrive, scanSettings.FileThreshold, scanSettings.FolderThreshold, token, progress), token);
                             token.ThrowIfCancellationRequested();
                             storageResults[scanDrive] = storage;
+                            cacheError = await SaveScanResultAsync(StorageCacheKey(scanDrive), storage, DateTimeOffset.Now) ?? cacheError;
                             inventoryErrors.Remove(stage);
                             break;
                         case "history":
@@ -197,6 +204,7 @@ public partial class MainWindow : Window
                             var rows = await Task.Run(() => CollectInventory(stage, token), token);
                             token.ThrowIfCancellationRequested();
                             inventoryResults[stage] = rows;
+                            cacheError = await SaveScanResultAsync(stage, rows, DateTimeOffset.Now) ?? cacheError;
                             current[stage] = rows.Select(row => row.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                             inventoryErrors.Remove(stage);
                             break;
@@ -206,29 +214,12 @@ public partial class MainWindow : Window
                     or System.Security.SecurityException or Win32Exception or JsonException)
                 {
                     failures++;
-                    if (stage == "dashboard")
-                    {
-                        ComputerText.Text = "시스템 정보 조회 실패";
-                        WindowsText.Text = error.Message;
-                        DriveHeading.Text = "시스템 드라이브";
-                        DriveSpace.Text = "용량 조회 실패";
-                        DriveUsage.Visibility = Visibility.Collapsed;
-                    }
-                    else if (stage == "events")
-                    {
-                        events = null;
-                        EventsGrid.ItemsSource = null;
+                    inventoryErrors[stage] = error.Message;
+                    if (stage == "events" && events is null)
                         EventSummary.Text = $"이벤트 로그 조회 실패 · {error.Message}";
-                    }
-                    else
-                    {
-                        inventoryErrors[stage] = error.Message;
-                        inventoryResults.Remove(stage);
-                        if (stage == "storage" && scanDrive is not null)
-                            storageResults.Remove(scanDrive);
-                    }
                 }
                 RefreshOverviewCounts();
+                RefreshScanTime();
                 ScanProgress.IsIndeterminate = false;
                 ScanProgress.Value = ++completedStages;
                 if (stage == activePage)
@@ -257,7 +248,8 @@ public partial class MainWindow : Window
             var result = failures == 0 ? "검사 완료" : $"검사 종료 · {failures}/{stages.Length}개 조회 실패";
             if (only is null)
                 LastScanText.Text = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} · {result}";
-            StatusText.Text = historyError is null ? result : $"{result} · 기록 저장 실패: {historyError}";
+            var saveError = historyError ?? cacheError;
+            StatusText.Text = saveError is null ? result : $"{result} · 기록 저장 실패: {saveError}";
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -377,7 +369,8 @@ public partial class MainWindow : Window
     private void OpenPage(string page)
     {
         RestoreWindow();
-        NavigationList.SelectedItem = NavigationList.Items.OfType<ListBoxItem>().Single(item => Equals(item.Tag, page));
+        var list = page is "history" or "settings" ? UtilityNavigationList : NavigationList;
+        list.SelectedItem = list.Items.OfType<ListBoxItem>().Single(item => Equals(item.Tag, page));
     }
 
     private void RestoreWindow()
