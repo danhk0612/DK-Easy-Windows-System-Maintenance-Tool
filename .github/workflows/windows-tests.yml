@@ -37,10 +37,7 @@ jobs:
           $requestedVersion = $env:RELEASE_VERSION
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $requestedVersion = $env:GITHUB_REF_NAME }
           if ($requestedVersion) {
-            if ($requestedVersion -notmatch '^v(\d+\.\d+\.\d+)
-      - name: Run Windows integration checks
-        run: dotnet run --project tests/WindowsSmoke/WindowsSmoke.csproj -c Release -- artifacts/publish/DK.Easy.WindowsMaintenance.dll
-) { throw 'Expected vMAJOR.MINOR.PATCH tag.' }
+            if ($requestedVersion -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Expected vMAJOR.MINOR.PATCH tag.' }
             $version = $Matches[1]
           }
           dotnet publish src/DK.Easy.WindowsMaintenance/DK.Easy.WindowsMaintenance.csproj -c Release -r win-x64 --self-contained false -p:Version=$version -o artifacts/publish
