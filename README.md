@@ -4,11 +4,14 @@ Windows 11 PC의 **정기점검 및 선택적 정리**를 위한 간단한 데�
 
 > 원칙: **검사 → 결과 확인 → 사용자가 선택 → 변경**. 자동 최적화, 무분별한 레지스트리 청소, 시스템 튜닝은 하지 않습니다.
 
-## 현재 상태 (초기 프로젝트)
+## 현재 사용 가능
 
-- **M0 초기 문서 및 WPF 골격 준비 단계**입니다.
-- 실제 시스템 검사, 삭제, 서비스 변경 기능은 아직 구현되지 않았습니다.
-- 개발 범위를 확정한 뒤 작은 단계로 구현합니다. 완료되지 않은 기능을 작동하는 것처럼 보여주지 않습니다.
+- 대시보드에서 PC 이름, Windows 버전·빌드, 시스템 드라이브의 총·사용·남은 용량 확인.
+- 전체 검사 진행 단계, 취소, 조회 실패 표시.
+- 시스템 문제에서 Windows 시스템·응용 프로그램 로그의 심각·오류 및 Windows 오류 보고를 최신순 최대 200건 조회. 경고는 설정에서 선택.
+- 이벤트 상세 열람과 UTF-8 TXT·JSON 내보내기. 보고서에는 발생 시각, 로그 채널, 원본, 이벤트 ID, 레코드 ID와 Windows가 제공하는 설명이 포함됩니다.
+- 트레이 메뉴에서 창 열기, 전체 검사, 시스템 문제, 설정, 종료. 설정에서 닫기 동작, 최소화 동작, 앱 시작 시 검사와 로그 조회 범위를 지정합니다.
+- 아래 목표 기능의 나머지 구현 상태는 [진행 현황](docs/STATUS.md)을 참고하세요.
 
 ## 목표 기능
 
@@ -30,7 +33,7 @@ Windows 11 PC의 **정기점검 및 선택적 정리**를 위한 간단한 데�
 - C# / .NET 10 / WPF
 - 한국어 UI, 기본적으로 외부 서버·DB·계정 없음
 - 설정 및 점검 기록은 로컬 JSON
-- 목표 배포: self-contained win-x64, 가능한 한 단일 EXE (실제 게시 결과 확인 필요)
+- 배포: Windows x64, 실행 PC에 .NET 10 Desktop Runtime(x64) 설치 필요
 
 Windows에서 .NET 10 SDK를 설치한 뒤 저장소 루트에서:
 
@@ -42,10 +45,10 @@ dotnet run --project .\src\DK.Easy.WindowsMaintenance\DK.Easy.WindowsMaintenance
 릴리스 게시(기능 개발 및 검증 뒤 실행):
 
 ```powershell
-dotnet publish .\src\DK.Easy.WindowsMaintenance\DK.Easy.WindowsMaintenance.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+dotnet publish .\src\DK.Easy.WindowsMaintenance\DK.Easy.WindowsMaintenance.csproj -c Release -r win-x64 --self-contained false
 ```
 
-**주의:** 초기 스캐폴드는 실제 Windows 환경에서 빌드/실행 검증해야 합니다. 실행 파일이 만들어졌다고 해서 시스템 변경 기능이 검증된 것은 아닙니다.
+게시 폴더의 파일을 함께 보관한 뒤 `DK.Easy.WindowsMaintenance.exe`를 실행합니다. 이벤트 설명에 Windows가 기록한 경로나 장치 정보가 들어갈 수 있으므로 보고서를 공유하기 전에 내용을 확인하세요.
 
 ## 새 Work / Codex 작업 시작
 
@@ -61,3 +64,4 @@ dotnet publish .\src\DK.Easy.WindowsMaintenance\DK.Easy.WindowsMaintenance.cspro
 레지스트리 정리/최적화, Windows 핵심 서비스 튜닝, 드라이버·WinSxS 강제 삭제, 메모리/게임/네트워크 최적화, AI 진단, 상주 모니터링, 자동 예약 청소, 원격 관리.
 
 라이선스는 아직 확정하지 않았습니다.
+
