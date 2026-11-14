@@ -32,3 +32,7 @@ Windows 11 PC의 저장 공간, 시작 프로그램, 서비스, 예약 작업과
 - 이 버전의 실기 검증 항목은 [Windows 실기 테스트](docs/MANUAL_TESTS.md)에 정리되어 있습니다. 문제를 발견하면 재현 순서와 앱 버전을 포함해 [GitHub Issues](https://github.com/danhk0612/DK-Easy-Windows-System-Maintenance-Tool/issues)에 남겨 주세요.
 
 개발 및 빌드 안내는 [개발 문서](AGENTS.md), 검증 결과는 [진행 현황](docs/STATUS.md)에서 확인할 수 있습니다.
+
+## 라이선스
+
+[MIT License](LICENSE)
