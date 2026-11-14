@@ -82,7 +82,7 @@ public partial class MainWindow
 
     private void RefreshInventory()
     {
-        if (InventoryGrid is null || activePage is "dashboard" or "events" or "settings" or "antivirus")
+        if (InventoryGrid is null || activePage is "dashboard" or "events" or "settings" or "antivirus" or "unlock")
             return;
 
         refreshingInventory = true;
@@ -191,7 +191,7 @@ public partial class MainWindow
             return;
         var selection = InventoryGrid.SelectedItem;
         InventoryDetails.IsEnabled = selection is not null;
-        UnlockButton.IsEnabled = !InspectionBusy && selection is StorageEntry { Kind: not "폴더" };
+        UnlockButton.IsEnabled = !InspectionBusy && selection is StorageEntry;
         OpenLocationButton.IsEnabled = selection is StorageEntry || selection is InventoryEntry { Target: not null };
         ManageButton.IsEnabled = !InspectionBusy && (activePage == "apps"
             || selection is StorageEntry || selection is InventoryEntry);

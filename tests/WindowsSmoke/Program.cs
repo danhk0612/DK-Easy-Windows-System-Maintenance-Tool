@@ -42,6 +42,19 @@ try
     Require(Rows(Invoke("FileLocks", "Find", path)).Count() == 0, "Unlocked fixture has no Restart Manager holders");
     using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         Require(!(bool)Invoke("FileLocks", "IsAvailable", path), "Exclusive file lock is detected");
+    var nested = Directory.CreateDirectory(Path.Combine(root.FullName, "nested"));
+    var nestedFile = Path.Combine(nested.FullName, "locked.txt");
+    File.WriteAllText(nestedFile, "fixture");
+    using (File.Open(nestedFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+    {
+        var locks = Invoke("FileLocks", "Search", root.FullName, token);
+        Require((int)Property(locks, "LockedFiles") == 1, "Folder search finds a locked nested file");
+    }
+    var clearedLocks = Invoke("FileLocks", "Search", root.FullName, token);
+    Require((int)Property(clearedLocks, "LockedFiles") == 0, "Folder search refreshes when the lock is released");
+    Reject<OperationCanceledException>(() => Invoke("FileLocks", "Search", root.FullName, new CancellationToken(true)));
+    File.Delete(nestedFile);
+    nested.Delete();
     File.AppendAllText(path, "changed");
     Reject<IOException>(() => Invoke("MaintenanceActions", "Recycle", selected));
     Require(File.Exists(path), "Locked and changed fixtures stayed in place");
@@ -114,7 +127,7 @@ try
 finally
 {
     File.Delete(Path.Combine(root.FullName, "fixture.txt"));
-    root.Delete();
+    root.Delete(recursive: true);
 }
 
 object FindStartup(string name, string location) => Rows(Invoke("InventoryScan", "Startup", token))

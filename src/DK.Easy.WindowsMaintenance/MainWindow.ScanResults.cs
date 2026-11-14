@@ -90,7 +90,7 @@ public partial class MainWindow
 
     private void RefreshScanTime()
     {
-        PageScanTime.Visibility = activePage is "settings" or "history" ? Visibility.Collapsed : Visibility.Visible;
+        PageScanTime.Visibility = activePage is "settings" or "history" or "unlock" ? Visibility.Collapsed : Visibility.Visible;
         var key = ActiveScanKey;
         PageScanTime.Text = scanTimes.TryGetValue(key, out var when)
             ? $"마지막 검사 {when.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
